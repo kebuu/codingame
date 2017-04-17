@@ -1,6 +1,7 @@
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static java.lang.Math.abs;
 
@@ -11,6 +12,7 @@ import static java.lang.Math.abs;
 class Player {
 
     static GameState gameState;
+    static Set<Mine> knownMines = new HashSet<>();
     private static boolean debugEnabled;
 
     public static void main(String args[]) {
@@ -28,20 +30,30 @@ class Player {
                 int x = in.nextInt();
                 int y = in.nextInt();
                 int orientation = in.nextInt();
-                int speed = in.nextInt();
+                int shipSpeedOrCannonBallImpactDelay = in.nextInt();
                 int rhum = in.nextInt();
-                int mine = in.nextInt();
+                int isMine = in.nextInt();
 
                 if (entityType.equals("BARREL")) {
                     Barrel barrel = new Barrel(entityId, x, y, rhum);
                     gameState.addBarrel(barrel);
                 } else if (entityType.equals("SHIP")) {
-                    Ship ship = new Ship(entityId, x, y, speed, orientation);
-                    gameState.addShip(ship, mine);
+                    Ship ship = new Ship(entityId, x, y, shipSpeedOrCannonBallImpactDelay, orientation);
+                    gameState.addShip(ship, isMine);
+                } else if (entityType.equals("MINE")) {
+                    Mine mine = new Mine(entityId, x, y);
+                    knownMines.add(mine);
+                } else if (entityType.equals("CANNONBALL")) {
+                    CannonBall cannonBall = new CannonBall(entityId, x, y, shipSpeedOrCannonBallImpactDelay);
+                    gameState.addCannonBall(cannonBall);
                 } else {
-                    System.err.println("Y a un truc que j'ai pas du piger...");
+                    throw new RuntimeException("Y a un truc que j'ai pas du piger...");
                 }
             }
+
+            knownMines.removeIf(mine -> gameState.getShipAt(mine.coordinate).isPresent());
+
+            gameState.addAllMines(knownMines);
 
             for (int i = 0; i < myShipCount; i++) {
                 Ship ship = gameState.getShip(i);
@@ -57,7 +69,6 @@ class Player {
                 } else {
                     System.out.println("WAIT");
                 }
-
             }
         }
     }
@@ -66,6 +77,8 @@ class Player {
         List<Ship> myShips = new ArrayList<>();
         List<Ship> enemyShips = new ArrayList<>();
         List<Barrel> barrels = new ArrayList<>();
+        Set<Mine> mines = new HashSet<>();
+        List<CannonBall> cannonBalls = new ArrayList<>();
 
         void addBarrel(Barrel barrel) {
             barrels.add(barrel);
@@ -93,6 +106,20 @@ class Player {
                     positioned1.coordinate.toString(), positioned2.coordinate.toString()));
             return distance;
         }
+
+        void addCannonBall(CannonBall cannonBall) {
+            cannonBalls.add(cannonBall);
+        }
+
+        void addAllMines(Set<Mine> mines) {
+            this.mines.addAll(mines);
+        }
+
+        public Optional<Ship> getShipAt(Coordinate coordinate) {
+            return Stream.concat(myShips.stream(), enemyShips.stream())
+                .filter(ship -> ship.coordinate.equals(coordinate))
+                .findFirst();
+        }
     }
 
     static abstract class Positioned extends Identifiable {
@@ -101,6 +128,9 @@ class Player {
         Positioned(int id, Coordinate coordinate) {
             super(id);
             this.coordinate = coordinate;
+        }
+        Positioned(int id, int x, int y) {
+            this(id, new Coordinate(x, y));
         }
 
         @Override
@@ -114,6 +144,21 @@ class Player {
 
         Identifiable(int id) {
             this.id = id;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            Identifiable that = (Identifiable) o;
+
+            return id == that.id;
+        }
+
+        @Override
+        public int hashCode() {
+            return id;
         }
     }
 
@@ -134,7 +179,7 @@ class Player {
             return new CubeCoordinate(this).distance(other.toCubeCoordinate());
         }
 
-        Path pathTo(Coordinate destination, GameState gameState) {
+        Optional<Path> pathTo(Coordinate destination, GameState gameState) {
             Queue<PrioritizedCoordinate> queue = new PriorityQueue();
             queue.add(new PrioritizedCoordinate(this, 0.));
 
@@ -144,23 +189,28 @@ class Player {
             Map<Coordinate, Double> costs = new HashMap<>();
             costs.put(this, 0.);
 
+            boolean pathFound = false;
             while (!queue.isEmpty()) {
                 PrioritizedCoordinate currentPrioritizedCoordinate = queue.poll();
                 Coordinate currentCoordinate = currentPrioritizedCoordinate.coordinate;
 
                 if (currentCoordinate.equals(destination)) {
+                    pathFound = true;
                     break;
                 }
 
                 List<Coordinate> neighbors = currentCoordinate.neighbors();
                 for (Coordinate neighbor : neighbors) {
-                    double newCost = costs.get(currentCoordinate) + costBetween(currentCoordinate, neighbor);
 
-                    if (!costs.containsKey(neighbor) || newCost < costs.get(neighbor)) {
-                        costs.put(neighbor, newCost);
-                        double priority = newCost + heuristic(destination, neighbor);
-                        queue.add(new PrioritizedCoordinate(neighbor, priority));
-                        cameFrom.put(neighbor, currentPrioritizedCoordinate);
+                    if (gameState.mines.stream().noneMatch(mine -> mine.coordinate.equals(neighbor))) {
+                        double newCost = costs.get(currentCoordinate) + costBetween(currentCoordinate, neighbor);
+
+                        if (!costs.containsKey(neighbor) || newCost < costs.get(neighbor)) {
+                            costs.put(neighbor, newCost);
+                            double priority = newCost + heuristic(destination, neighbor);
+                            queue.add(new PrioritizedCoordinate(neighbor, priority));
+                            cameFrom.put(neighbor, currentPrioritizedCoordinate);
+                        }
                     }
                 }
             }
@@ -168,13 +218,13 @@ class Player {
             Path path = new Path(this, destination);
 
             Coordinate pathStep = destination;
-            while (!pathStep.equals(this)) {
-                path.addLast(pathStep);
+            while (pathFound && !pathStep.equals(this)) {
+                path.addFirst(pathStep);
                 PrioritizedCoordinate prioritizedCoordinate = cameFrom.get(pathStep);
                 pathStep = prioritizedCoordinate.coordinate;
             }
 
-            return path;
+            return path.isEmpty() ? Optional.empty() : Optional.of(path);
         }
 
         double heuristic(Coordinate coordinate1, Coordinate coordinate2) {
@@ -214,6 +264,10 @@ class Player {
 
         Coordinate plusXY(int value) {
             return plusX(value).plusY(value);
+        }
+
+        int sumXY() {
+            return x + y;
         }
 
         @Override
@@ -269,6 +323,28 @@ class Player {
         Ship(int id, int x, int y, int speed, int orientation) {
             this(id, new Coordinate(x, y), speed, orientation);
         }
+
+        ShipCoordinates shipCoordinates(){
+            ShipCoordinates shipCoordinates = new ShipCoordinates(coordinate, orientation);
+
+            if (orientation % 3 == 0) {
+                shipCoordinates.addHeadAndTail(coordinate.plusX(1), coordinate.plusX(-1));
+            } else if (orientation % 3 == 1) {
+                if (coordinate.x % 2 == 0) {
+                    shipCoordinates.addHeadAndTail(coordinate.plusX(-1), coordinate.plusX(1).plusY(-1));
+                } else {
+                    shipCoordinates.addHeadAndTail(coordinate.plusX(-1).plusY(1), coordinate.plusX(1));
+                }
+            } else {
+                if (coordinate.x % 2 == 0) {
+                    shipCoordinates.addHeadAndTail(coordinate.plusX(-1).plusY(-1), coordinate.plusX(1));
+                } else {
+                    shipCoordinates.addHeadAndTail(coordinate.plusX(-1), coordinate.plusX(1).plusY(1));
+                }
+            }
+
+            return shipCoordinates;
+        }
     }
 
     static class Barrel extends Positioned {
@@ -309,7 +385,7 @@ class Player {
             return steps.size();
         }
 
-        void addLast(Coordinate coordinate) {
+        void addFirst(Coordinate coordinate) {
             steps.add(0, coordinate);
         }
 
@@ -336,6 +412,54 @@ class Player {
         @Override
         public String toString() {
             return coordinate.toString() + "(" + priority + ")";
+        }
+    }
+
+    static class Mine extends Positioned {
+        Mine(int id, int x, int y) {
+            super(id, x, y);
+        }
+
+        public Mine(int size, Coordinate coordinate) {
+            super(size, coordinate);
+        }
+    }
+
+    static class CannonBall extends Identifiable{
+        final Coordinate target;
+        final int impactDelay;
+
+        public CannonBall(int entityId, int x, int y, int shipSpeedOrCannonBallImpactDelay) {
+            super(entityId);
+            target = new Coordinate(x, y);
+            impactDelay = shipSpeedOrCannonBallImpactDelay;
+        }
+    }
+
+    static class ShipCoordinates {
+        static final List<Integer> FORWARD_ORIENTATIONS = Arrays.asList(4, 5, 0);
+
+        Coordinate head;
+        Coordinate tail;
+        Coordinate center;
+        int orientation;
+
+        ShipCoordinates(Coordinate coordinate, int orientation) {
+            center = coordinate;
+        }
+
+        void addHeadAndTail(Coordinate coordinate1, Coordinate coordinate2) {
+            int coordinate1SumXY = coordinate1.sumXY();
+            int coordinate2SumXY = coordinate2.sumXY();
+
+            if ((FORWARD_ORIENTATIONS.contains(orientation) && coordinate1SumXY > coordinate2SumXY) ||
+                    (!FORWARD_ORIENTATIONS.contains(orientation) && coordinate1SumXY < coordinate2SumXY)  ) {
+                head = coordinate1;
+                tail = coordinate2;
+            } else {
+                head = coordinate2;
+                tail = coordinate1;
+            }
         }
     }
 }

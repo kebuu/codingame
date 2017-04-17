@@ -1,8 +1,14 @@
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class PlayerTest {
+
+    AtomicInteger ids = new AtomicInteger();
 
     Player.Coordinate coordinate1 = new Player.Coordinate(0, 0);
     Player.Coordinate coordinate2 = new Player.Coordinate(5, 2);
@@ -27,10 +33,32 @@ public class PlayerTest {
 
     @Test
     public void testPath() {
-        assertThat(coordinate1.pathTo(coordinate1, new Player.GameState()).toString()).isEqualTo("");
-        assertThat(coordinate1.pathTo(coordinate2, new Player.GameState()).toString()).isEqualTo("[1,0][2,1][3,1][4,2][5,2]");
-        assertThat(coordinate1.pathTo(coordinate3, new Player.GameState()).size()).isEqualTo(4);
-        assertThat(coordinate1.pathTo(coordinate4, new Player.GameState()).size()).isEqualTo(5);
-        assertThat(coordinate1.pathTo(coordinate8, new Player.GameState()).size()).isEqualTo(4);
+        assertThat(coordinate1.pathTo(coordinate1, new Player.GameState())).isEmpty();
+        assertThat(coordinate1.pathTo(coordinate2, new Player.GameState()).get().toString()).isEqualTo("[1,0][2,1][3,1][4,2][5,2]");
+        assertThat(coordinate1.pathTo(coordinate3, new Player.GameState()).get().size()).isEqualTo(4);
+        assertThat(coordinate1.pathTo(coordinate4, new Player.GameState()).get().size()).isEqualTo(5);
+        assertThat(coordinate1.pathTo(coordinate8, new Player.GameState()).get().size()).isEqualTo(4);
+    }
+
+    @Test
+    public void testPathWithObstacle() {
+        Player.GameState gameState = new Player.GameState();
+        gameState.addAllMines(mines(xy(3, 1), xy(2,2), xy(1, 2)));
+        assertThat(coordinate1.pathTo(coordinate2, gameState).get().toString()).isEqualTo("[1,0][2,1][3,0][4,1][5,1][5,2]");
+
+        gameState.addAllMines(mines(xy(3, 0), xy(0,2)));
+        assertThat(coordinate1.pathTo(coordinate2, gameState)).isEmpty();
+    }
+
+    private Set<Player.Mine> mines(Player.Coordinate... coordinates) {
+        Set<Player.Mine> mines = new HashSet<>();
+        for (Player.Coordinate coordinate : coordinates) {
+            mines.add(new Player.Mine(ids.getAndIncrement(), coordinate));
+        }
+        return mines;
+    }
+
+    private Player.Coordinate xy(int x, int y) {
+        return new Player.Coordinate(x, y);
     }
 }
