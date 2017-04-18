@@ -11,15 +11,25 @@ import static java.lang.Math.abs;
  **/
 class Player {
 
+    private static final double MAX_SHOOTABLE_DISTANCE = 10;
+
     static GameState gameState;
     static Set<Mine> knownMines = new HashSet<>();
-    private static boolean debugEnabled;
+    static Coordinate nextPathStep;
+    static int currentTurn;
+    private static boolean debugEnabled = false;
 
     public static void main(String args[]) {
+        CompositeStrategy strategy = new CompositeStrategy();
+        strategy.add(new ClosestBarrelStrategy());
+        strategy.add(new FireStrategy());
+        strategy.add(new EscapeCanonBallStrategy());
+
         Scanner in = new Scanner(System.in);
 
         // game loop
         while (true) {
+            currentTurn++;
             gameState = new GameState();
 
             int myShipCount = in.nextInt(); // the number of remaining ships
@@ -29,16 +39,16 @@ class Player {
                 String entityType = in.next();
                 int x = in.nextInt();
                 int y = in.nextInt();
-                int orientation = in.nextInt();
+                int orientationOrBarrelRhumQuantity = in.nextInt();
                 int shipSpeedOrCannonBallImpactDelay = in.nextInt();
-                int rhum = in.nextInt();
+                int rhumInShip = in.nextInt();
                 int isMine = in.nextInt();
 
                 if (entityType.equals("BARREL")) {
-                    Barrel barrel = new Barrel(entityId, x, y, rhum);
+                    Barrel barrel = new Barrel(entityId, x, y, orientationOrBarrelRhumQuantity);
                     gameState.addBarrel(barrel);
                 } else if (entityType.equals("SHIP")) {
-                    Ship ship = new Ship(entityId, x, y, shipSpeedOrCannonBallImpactDelay, orientation);
+                    Ship ship = new Ship(entityId, x, y, shipSpeedOrCannonBallImpactDelay, rhumInShip);
                     gameState.addShip(ship, isMine);
                 } else if (entityType.equals("MINE")) {
                     Mine mine = new Mine(entityId, x, y);
@@ -60,15 +70,8 @@ class Player {
 
                 // Write an action using System.out.println()
                 // To debug: System.err.println("Debug messages...");
-
-                Optional<Barrel> closestBarrel = gameState.findClosestBarrel(ship);
-
-                if (closestBarrel.isPresent()) {
-                    Coordinate barrelCoordinate = closestBarrel.get().coordinate;
-                    System.out.println(String.format("MOVE %d %d", barrelCoordinate.x, barrelCoordinate.y));
-                } else {
-                    System.out.println("WAIT");
-                }
+                Action action = strategy.getAction(ship, gameState);
+                System.out.println(action.execute());
             }
         }
     }
@@ -96,15 +99,28 @@ class Player {
             }
         }
 
-        Optional<Barrel> findClosestBarrel(Ship ship) {
-             return barrels.stream().min(Comparator.comparing(barrel -> distance(barrel, ship)));
+        Optional<Barrel> findClosestSafeBarrel(Ship ship) {
+             return barrels.stream()
+                     .filter(barrel -> !gameState.hasMine(barrel.coordinate))
+                     .min(Comparator.comparing(barrel -> distance(barrel, ship)));
+        }
+
+        private boolean hasMine(Coordinate coordinate) {
+            return mines.stream().anyMatch(mine -> mine.coordinate.equals(coordinate));
+        }
+
+        private boolean receivesCannonBallNextTurn(Coordinate coordinate) {
+            return cannonBalls.stream()
+                    .filter(cannonBall -> cannonBall.impactDelay == 1)
+                    .anyMatch(cannonBall -> cannonBall.target.equals(coordinate));
+        }
+
+        private int turnToCannonBallImpact(Coordinate source, Coordinate target) {
+            return (int) (1 + Math.round(source.distance(target) / 3.));
         }
 
         Double distance(Positioned positioned1, Positioned positioned2) {
-            double distance = positioned1.coordinate.distance(positioned2.coordinate);
-            log(String.format("Distance : " + distance + " (%s -> %s)",
-                    positioned1.coordinate.toString(), positioned2.coordinate.toString()));
-            return distance;
+            return positioned1.coordinate.distance(positioned2.coordinate);
         }
 
         void addCannonBall(CannonBall cannonBall) {
@@ -120,6 +136,21 @@ class Player {
                 .filter(ship -> ship.coordinate.equals(coordinate))
                 .findFirst();
         }
+
+        public Optional<Ship> findClosestShootableShip(Ship ship) {
+            Ship closestShip = null;
+            double distanceFromClosestShip = -1;
+
+            for (Ship enemyShip : enemyShips) {
+                double distance = enemyShip.distance(ship.shipCoordinates().head);
+
+                if ((closestShip == null || distance < distanceFromClosestShip) && distance <= MAX_SHOOTABLE_DISTANCE) {
+                    closestShip = enemyShip;
+                    distanceFromClosestShip = distance;
+                }
+            }
+            return Optional.ofNullable(closestShip);
+        }
     }
 
     static abstract class Positioned extends Identifiable {
@@ -129,8 +160,25 @@ class Player {
             super(id);
             this.coordinate = coordinate;
         }
+
         Positioned(int id, int x, int y) {
             this(id, new Coordinate(x, y));
+        }
+
+        Optional<Path> pathTo(Positioned destination, GameState gameState) {
+            return coordinate.pathTo(destination.coordinate, gameState, PathSearchMode.SAFE);
+        }
+
+        Optional<Path> pathTo(Positioned destination, GameState gameState, PathSearchMode mode) {
+            return coordinate.pathTo(destination.coordinate, gameState, mode);
+        }
+
+        double distance(Positioned positioned) {
+            return coordinate.distance(positioned);
+        }
+
+        double distance(Coordinate coordinate) {
+            return coordinate.distance(coordinate);
         }
 
         @Override
@@ -179,7 +227,15 @@ class Player {
             return new CubeCoordinate(this).distance(other.toCubeCoordinate());
         }
 
+        double distance(Positioned positioned) {
+            return distance(positioned.coordinate);
+        }
+
         Optional<Path> pathTo(Coordinate destination, GameState gameState) {
+            return pathTo(destination, gameState, PathSearchMode.SAFE);
+        }
+
+        Optional<Path> pathTo(Coordinate destination, GameState gameState, PathSearchMode mode) {
             Queue<PrioritizedCoordinate> queue = new PriorityQueue();
             queue.add(new PrioritizedCoordinate(this, 0.));
 
@@ -202,7 +258,7 @@ class Player {
                 List<Coordinate> neighbors = currentCoordinate.neighbors();
                 for (Coordinate neighbor : neighbors) {
 
-                    if (gameState.mines.stream().noneMatch(mine -> mine.coordinate.equals(neighbor))) {
+                    if (mode.equals(PathSearchMode.UNSAFE) || isNeighborSafe(neighbor, currentCoordinate, gameState)) {
                         double newCost = costs.get(currentCoordinate) + costBetween(currentCoordinate, neighbor);
 
                         if (!costs.containsKey(neighbor) || newCost < costs.get(neighbor)) {
@@ -225,6 +281,17 @@ class Player {
             }
 
             return path.isEmpty() ? Optional.empty() : Optional.of(path);
+        }
+
+        boolean isNeighborSafe(Coordinate neighbor, Coordinate baseCoordinate, GameState gameState) {
+            boolean neighborHasMine = gameState.hasMine(neighbor);
+
+            boolean shipWillReceiveCannonBallNextTurnAfterMoving = false;
+            if (baseCoordinate.equals(this)) {
+                shipWillReceiveCannonBallNextTurnAfterMoving = gameState.receivesCannonBallNextTurn(neighbor);
+            }
+
+            return !neighborHasMine && !shipWillReceiveCannonBallNextTurnAfterMoving;
         }
 
         double heuristic(Coordinate coordinate1, Coordinate coordinate2) {
@@ -270,6 +337,31 @@ class Player {
             return x + y;
         }
 
+        int orientationTo(Coordinate destination) {
+            CubeCoordinate fromCubeCoordinate = this.toCubeCoordinate();
+            CubeCoordinate nextStepCubeCoordinate = destination.toCubeCoordinate();
+
+            if (fromCubeCoordinate.x == nextStepCubeCoordinate.x) {
+                if (this.sumXY() > destination.sumXY()) {
+                    return 2;
+                } else {
+                    return 5;
+                }
+            } else if (fromCubeCoordinate.y == nextStepCubeCoordinate.y) {
+                if (this.y > destination.y) {
+                    return 1;
+                } else {
+                    return 4;
+                }
+            } else {
+                if (this.sumXY() > destination.sumXY()) {
+                    return 3;
+                } else {
+                    return 0;
+                }
+            }
+        }
+
         @Override
         public boolean equals(Object o) {
             if (this == o) return true;
@@ -308,6 +400,11 @@ class Player {
         int distance(CubeCoordinate other){
             return IntStream.of(abs(x - other.x), abs(y - other.y), abs(z - other.z)).max().getAsInt();
         }
+
+        @Override
+        public String toString() {
+            return String.format("[%d,%d,%d]", x, y, z);
+        }
     }
 
     static class Ship extends Positioned {
@@ -345,6 +442,11 @@ class Player {
 
             return shipCoordinates;
         }
+
+        @Override
+        public String toString() {
+            return super.toString() + String.format("(speed : %d, orientation: %d, coordinates: %s)", speed, orientation, shipCoordinates().asList().toString());
+        }
     }
 
     static class Barrel extends Positioned {
@@ -358,11 +460,16 @@ class Player {
         Barrel(int id, int x, int y, int quantity) {
             this(id, new Coordinate(x, y), quantity);
         }
+
+        @Override
+        public String toString() {
+            return super.toString() + "(" + quantity + ")";
+        }
     }
 
-    static void log(String log) {
+    static void log(Object object) {
         if (debugEnabled) {
-            System.err.println(log);
+            System.err.println(object);
         }
     }
 
@@ -392,6 +499,15 @@ class Player {
         @Override
         public String toString() {
             return steps.stream().map(coordinate -> coordinate.toString()).collect(Collectors.joining());
+        }
+
+        Coordinate firstStep() {
+            return steps.get(0);
+        }
+        boolean isNextStepStraightForward(Ship ship) {
+            log(this);
+            log(ship.shipCoordinates().head + "-" + firstStep());
+            return ship.shipCoordinates().head.equals(firstStep());
         }
     }
 
@@ -434,6 +550,11 @@ class Player {
             target = new Coordinate(x, y);
             impactDelay = shipSpeedOrCannonBallImpactDelay;
         }
+
+        @Override
+        public String toString() {
+            return String.format("CannonBall - [%d, %d](%d)", target.x, target.y, impactDelay);
+        }
     }
 
     static class ShipCoordinates {
@@ -460,6 +581,177 @@ class Player {
                 head = coordinate2;
                 tail = coordinate1;
             }
+        }
+
+        List<Coordinate> asList() {
+            return Arrays.asList(head, center, tail);
+        }
+    }
+
+    enum PathSearchMode {
+        SAFE, UNSAFE
+    }
+
+    interface Action {
+        String execute();
+    }
+
+    static class WaitAction implements Action {
+        public String execute() {
+            return "WAIT";
+        }
+    }
+
+    static class MoveAction implements Action {
+
+        private Coordinate coordinate;
+
+        MoveAction(Coordinate coordinate) {
+            this.coordinate = coordinate;
+        }
+
+        public String execute() {
+            return String.format("MOVE %d %d", coordinate.x, coordinate.y);
+        }
+    }
+
+    static class FireAction implements Action {
+
+        private Coordinate coordinate;
+
+        FireAction(Coordinate coordinate) {
+            this.coordinate = coordinate;
+        }
+
+        public String execute() {
+            return String.format("FIRE %d %d", coordinate.x, coordinate.y);
+        }
+    }
+
+    static class MineAction implements Action {
+        public String execute() {
+            return "MINE";
+        }
+    }
+
+    static class SlowerAction implements Action {
+        public String execute() {
+            return "SLOWER";
+        }
+    }
+
+    static class FasterAction implements Action {
+        public String execute() {
+            return "FASTER";
+        }
+    }
+
+    static class CompositeStrategy implements Strategy {
+        List<Strategy> strategies = new ArrayList<>();
+
+        void add(Strategy strategy) {
+            strategies.add(strategy);
+        }
+
+        @Override
+        public Action getAction(Ship ship, GameState gameState) {
+            Action action = null;
+
+            for (Strategy strategy : strategies) {
+                action = strategy.getAction(ship, gameState);
+                if (action != null) {
+                    break;
+                }
+            }
+            return action == null ? new WaitAction() : action;
+        }
+    }
+
+    interface Strategy {
+        Action getAction(Ship ship, GameState gameState);
+    }
+
+    static class ClosestBarrelStrategy implements Strategy {
+
+        private Barrel lastTargetedBarrel;
+
+        @Override
+        public Action getAction(Ship ship, GameState gameState) {
+            Action action = null;
+
+            Optional<Barrel> closestSafeBarrelOrNot = gameState.findClosestSafeBarrel(ship);
+
+            if (closestSafeBarrelOrNot.isPresent()) {
+                Barrel closestSafeBarrel = closestSafeBarrelOrNot.get();
+                log(closestSafeBarrel);
+
+                Optional<Path> pathOrNot = ship.pathTo(closestSafeBarrel, gameState, PathSearchMode.UNSAFE);
+
+                if (pathOrNot.isPresent()) {
+                    if (!gameState.getShipAt(pathOrNot.get().firstStep()).isPresent()) {
+                        boolean targetBarrelChanged = !closestSafeBarrel.equals(lastTargetedBarrel);
+                        boolean shipIsInNotGoodDirection = !pathOrNot.get().isNextStepStraightForward(ship);
+                        log("targetBarrelChanged " + targetBarrelChanged);
+                        log("shipIsInNotGoodDirection " + shipIsInNotGoodDirection);
+                        log(closestSafeBarrel + "-" + lastTargetedBarrel);
+
+                        if (targetBarrelChanged || shipIsInNotGoodDirection || ship.speed == 0) {
+                            lastTargetedBarrel = closestSafeBarrel;
+                            action = new MoveAction(closestSafeBarrel.coordinate);
+                        }
+                    }
+                }
+            } else {
+                lastTargetedBarrel = null;
+            }
+
+            return action;
+        }
+    }
+
+    static class FireStrategy implements Strategy {
+
+        private int lastFireTurn = -1;
+
+        @Override
+        public Action getAction(Ship ship, GameState gameState) {
+            Action action = null;
+
+            if (lastFireTurn + 1 < currentTurn) {
+                Optional<Ship> targetOrNot = gameState.findClosestShootableShip(ship);
+                if (targetOrNot.isPresent()) {
+                    action = new FireAction(targetOrNot.get().shipCoordinates().head);
+                }
+            }
+            return action;
+        }
+    }
+
+    static class EscapeCanonBallStrategy implements Strategy {
+
+        @Override
+        public Action getAction(Ship ship, GameState gameState) {
+            Action action = null;
+
+            List<Coordinate> coordinates = ship.shipCoordinates().asList();
+            boolean shipIsTargeted = gameState.cannonBalls.stream()
+                    .map(cannonBall -> cannonBall.target)
+                    .anyMatch(coordinates::contains);
+
+            log(ship);
+            log(gameState.cannonBalls);
+            log(shipIsTargeted);
+
+            if (shipIsTargeted) {
+                Coordinate escapeDestination;
+                if (ship.coordinate.sumXY() > 20) {
+                    escapeDestination = new Coordinate(0, 0);
+                } else {
+                    escapeDestination = new Coordinate(20, 20);
+                }
+                action = new MoveAction(escapeDestination);
+            }
+            return action;
         }
     }
 }
