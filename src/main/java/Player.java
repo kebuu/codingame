@@ -15,9 +15,8 @@ class Player {
 
     static GameState gameState;
     static Set<Mine> knownMines = new HashSet<>();
-    static Coordinate nextPathStep;
     static int currentTurn;
-    private static boolean debugEnabled = false;
+    private static boolean debugEnabled = true;
 
     public static void main(String args[]) {
         CompositeStrategy strategy = new CompositeStrategy();
@@ -133,7 +132,7 @@ class Player {
 
         public Optional<Ship> getShipAt(Coordinate coordinate) {
             return Stream.concat(myShips.stream(), enemyShips.stream())
-                .filter(ship -> ship.coordinate.equals(coordinate))
+                .filter(ship -> ship.shipCoordinates().asList().contains(coordinate))
                 .findFirst();
         }
 
@@ -425,7 +424,7 @@ class Player {
             ShipCoordinates shipCoordinates = new ShipCoordinates(coordinate, orientation);
 
             if (orientation % 3 == 0) {
-                shipCoordinates.addHeadAndTail(coordinate.plusX(1), coordinate.plusX(-1));
+                shipCoordinates.addHeadAndTail(coordinate.plusY(1), coordinate.plusY(-1));
             } else if (orientation % 3 == 1) {
                 if (coordinate.x % 2 == 0) {
                     shipCoordinates.addHeadAndTail(coordinate.plusX(-1), coordinate.plusX(1).plusY(-1));
@@ -563,10 +562,11 @@ class Player {
         Coordinate head;
         Coordinate tail;
         Coordinate center;
-        int orientation;
+        final int orientation;
 
         ShipCoordinates(Coordinate coordinate, int orientation) {
             center = coordinate;
+            this.orientation = orientation;
         }
 
         void addHeadAndTail(Coordinate coordinate1, Coordinate coordinate2) {
@@ -617,7 +617,7 @@ class Player {
 
     static class FireAction implements Action {
 
-        private Coordinate coordinate;
+        Coordinate coordinate;
 
         FireAction(Coordinate coordinate) {
             this.coordinate = coordinate;
@@ -720,7 +720,17 @@ class Player {
             if (lastFireTurn + 1 < currentTurn) {
                 Optional<Ship> targetOrNot = gameState.findClosestShootableShip(ship);
                 if (targetOrNot.isPresent()) {
-                    action = new FireAction(targetOrNot.get().shipCoordinates().head);
+                    Ship targetShip = targetOrNot.get();
+                    ShipCoordinates shipCoordinates = targetShip.shipCoordinates();
+
+                    Coordinate target;
+                    if (targetShip.speed == 0) {
+                        target = shipCoordinates.center;
+                    } else {
+                        target = shipCoordinates.head;
+                    }
+                    lastFireTurn = currentTurn;
+                    action = new FireAction(target);
                 }
             }
             return action;
@@ -738,10 +748,6 @@ class Player {
                     .map(cannonBall -> cannonBall.target)
                     .anyMatch(coordinates::contains);
 
-            log(ship);
-            log(gameState.cannonBalls);
-            log(shipIsTargeted);
-
             if (shipIsTargeted) {
                 Coordinate escapeDestination;
                 if (ship.coordinate.sumXY() > 20) {
@@ -752,6 +758,14 @@ class Player {
                 action = new MoveAction(escapeDestination);
             }
             return action;
+        }
+    }
+
+    static class StopStrategy implements Strategy {
+
+        @Override
+        public Action getAction(Ship ship, GameState gameState) {
+            return new SlowerAction();
         }
     }
 }
