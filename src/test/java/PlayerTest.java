@@ -32,32 +32,43 @@ public class PlayerTest {
     }
 
     @Test
+    public void testFindClosestShootableShipFrom() {
+        Player.Ship ship1 = new Player.Ship(0, 10, 5, 1, 5);
+        Player.Ship ship2 = new Player.Ship(0, 22, 6, 0, 1);
+
+        Player.GameState gameState = new Player.GameState();
+        gameState.enemyShips.add(ship1);
+
+        assertThat(gameState.findClosestShootableShipFrom(ship2)).isEmpty();
+    }
+
+    @Test
     public void testPath() {
         assertThat(coordinate1.pathTo(coordinate1, new Player.GameState())).isEmpty();
-        assertThat(coordinate1.pathTo(coordinate2, new Player.GameState()).get().toString()).isEqualTo("[1,0][2,1][3,1][4,2][5,2]");
-        assertThat(coordinate1.pathTo(coordinate3, new Player.GameState()).get().size()).isEqualTo(4);
+        assertThat(coordinate1.pathTo(coordinate2, new Player.GameState()).get().toString()).isEqualTo("[1,0][1,1][2,2][3,2][4,2][5,2]");
+        assertThat(coordinate1.pathTo(coordinate3, new Player.GameState()).get().size()).isEqualTo(3);
         assertThat(coordinate1.pathTo(coordinate4, new Player.GameState()).get().size()).isEqualTo(5);
-        assertThat(coordinate1.pathTo(coordinate8, new Player.GameState()).get().size()).isEqualTo(4);
+        assertThat(coordinate1.pathTo(coordinate8, new Player.GameState()).get().size()).isEqualTo(5);
     }
 
     @Test
     public void testPathWithMines() {
         Player.GameState gameState = new Player.GameState();
-        gameState.addAllMines(mines(xy(3, 1), xy(2,2), xy(1, 2)));
-        assertThat(coordinate1.pathTo(coordinate2, gameState).get().toString()).isEqualTo("[1,0][2,1][3,0][4,1][5,1][5,2]");
+        gameState.addAllMines(mines(xy(1, 1), xy(2,1)));
+        assertThat(coordinate1.pathTo(coordinate2, gameState).get().toString()).isEqualTo("[1,0][2,0][3,0][3,1][4,2][5,2]");
 
-        gameState.addAllMines(mines(xy(3, 0), xy(0,2)));
+        gameState.addAllMines(mines(xy(3, 0), xy(0,1)));
         assertThat(coordinate1.pathTo(coordinate2, gameState)).isEmpty();
     }
 
     @Test
     public void testPathWithCannonball() {
         Player.GameState gameState = new Player.GameState();
-        gameState.addCannonBall(cannonBall(3, 1, 1));
+        gameState.addCannonBall(cannonBall(3, 2, 1));
         gameState.addCannonBall(cannonBall(1, 0, 3));
         gameState.addCannonBall(cannonBall(2, 1, 2));
 
-        assertThat(coordinate1.pathTo(coordinate2, gameState).get().toString()).isEqualTo("[1,0][2,1][3,1][4,2][5,2]");
+        assertThat(coordinate1.pathTo(coordinate2, gameState).get().toString()).isEqualTo("[1,0][1,1][2,2][3,2][4,2][5,2]");
 
         gameState.addCannonBall(cannonBall(1, 0, 1));
         assertThat(coordinate1.pathTo(coordinate2, gameState).get().toString()).isEqualTo("[0,1][1,1][2,2][3,2][4,2][5,2]");
@@ -75,12 +86,13 @@ public class PlayerTest {
 
     @Test
     public void testShipCoordinates() {
-        assertThat(new Player.Ship(0, 2, 2, 0, 0).shipCoordinates().asList().toString()).isEqualTo("[[2,3], [2,2], [2,1]]");
-        assertThat(new Player.Ship(0, 2, 2, 0, 1).shipCoordinates().asList().toString()).isEqualTo("[[1,2], [2,2], [3,1]]");
-        assertThat(new Player.Ship(0, 2, 2, 0, 2).shipCoordinates().asList().toString()).isEqualTo("[[1,1], [2,2], [3,2]]");
-        assertThat(new Player.Ship(0, 2, 2, 0, 3).shipCoordinates().asList().toString()).isEqualTo("[[2,1], [2,2], [2,3]]");
-        assertThat(new Player.Ship(0, 2, 2, 0, 4).shipCoordinates().asList().toString()).isEqualTo("[[3,1], [2,2], [1,2]]");
-        assertThat(new Player.Ship(0, 2, 2, 0, 5).shipCoordinates().asList().toString()).isEqualTo("[[3,2], [2,2], [1,1]]");
+        assertThat(new Player.Ship(0, 2, 2, 0, 0).shipCoordinates().asList().toString()).isEqualTo("[[3,2], [2,2], [1,2]]");
+        assertThat(new Player.Ship(0, 2, 2, 0, 1).shipCoordinates().asList().toString()).isEqualTo("[[2,1], [2,2], [1,3]]");
+        assertThat(new Player.Ship(0, 2, 2, 0, 2).shipCoordinates().asList().toString()).isEqualTo("[[1,1], [2,2], [2,3]]");
+        assertThat(new Player.Ship(0, 2, 2, 0, 3).shipCoordinates().asList().toString()).isEqualTo("[[1,2], [2,2], [3,2]]");
+        assertThat(new Player.Ship(0, 2, 2, 0, 4).shipCoordinates().asList().toString()).isEqualTo("[[1,3], [2,2], [2,1]]");
+        assertThat(new Player.Ship(0, 2, 2, 0, 5).shipCoordinates().asList().toString()).isEqualTo("[[2,3], [2,2], [1,1]]");
+        assertThat(new Player.Ship(0, 14, 7, 0, 4).shipCoordinates().asList().toString()).isEqualTo("[[14,8], [14,7], [15,6]]");
     }
 
     @Test
@@ -93,18 +105,18 @@ public class PlayerTest {
 
         gameState.cannonBalls.add(new Player.CannonBall(ids.incrementAndGet(), 0, 0, 1));
         gameState.cannonBalls.add(new Player.CannonBall(ids.incrementAndGet(), 1, 1, 1));
-        gameState.cannonBalls.add(new Player.CannonBall(ids.incrementAndGet(), 3, 2, 1));
+        gameState.cannonBalls.add(new Player.CannonBall(ids.incrementAndGet(), 2, 3, 1));
         assertThat(strategy.getAction(ship, gameState)).isNull();
 
         gameState.cannonBalls.add(new Player.CannonBall(ids.incrementAndGet(), 2, 2, 1));
         assertThat(strategy.getAction(ship, gameState)).isNotNull();
 
         gameState.cannonBalls.clear();
-        gameState.cannonBalls.add(new Player.CannonBall(ids.incrementAndGet(), 2, 1, 1));
+        gameState.cannonBalls.add(new Player.CannonBall(ids.incrementAndGet(), 1, 2, 1));
         assertThat(strategy.getAction(ship, gameState)).isNotNull();
 
         gameState.cannonBalls.clear();
-        gameState.cannonBalls.add(new Player.CannonBall(ids.incrementAndGet(), 2, 3, 1));
+        gameState.cannonBalls.add(new Player.CannonBall(ids.incrementAndGet(), 3, 2, 1));
         assertThat(strategy.getAction(ship, gameState)).isNotNull();
     }
 
@@ -115,13 +127,13 @@ public class PlayerTest {
         Player.GameState gameState = new Player.GameState();
 
         gameState.addShip(new Player.Ship(0, 4, 4, 1, 0), 0);
-        Player.FireAction action1 = (Player.FireAction) new Player.FireStrategy().getAction(ship, gameState);
-        assertThat(action1.coordinate).isEqualTo(xy(4, 5));
+        Player.FireAction action1 = (Player.FireAction) new Player.SimpleFireStrategy().getAction(ship, gameState);
+        assertThat(action1.coordinate).isEqualTo(xy(5, 4));
 
         Player.currentTurn = 20;
         gameState.enemyShips.clear();
         gameState.addShip(new Player.Ship(0, 4, 4, 0, 0), 0);
-        Player.FireAction action2 = (Player.FireAction) new Player.FireStrategy().getAction(ship, gameState);
+        Player.FireAction action2 = (Player.FireAction) new Player.SimpleFireStrategy().getAction(ship, gameState);
         assertThat(action2.coordinate).isEqualTo(xy(4, 4));
     }
 
