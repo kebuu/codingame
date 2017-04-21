@@ -19,28 +19,31 @@ class Player {
     static int currentTurn;
     static Ship currentShip;
     static Map<Integer, Integer> lastFireTurns = new HashMap<>();
-    static Map<Integer, Coordinate> moveAwayDestination = new HashMap<Integer, Coordinate>() {{
-        put(0, new Coordinate(0, 0));
-        put(1, new Coordinate(0, 20));
-        put(2, new Coordinate(20, 20));
-    }};
+    static Map<Ship, Coordinate> shipMoves = new HashMap<>();
+    static Map<Integer, List<Coordinate>> shipDestroyedMines = new HashMap<>();
+
     private static boolean debugEnabled = true;
 
     public static void main(String args[]) {
         CompositeStrategy strategy = new CompositeStrategy();
         //strategy.add(new MoveAwayStrategy());
         strategy.add(new EscapeCanonBallStrategy());
+        strategy.add(new EscapeCanonBallStrategyInCourse());
+        strategy.add(new DestroyMineOnEnemyStrategy());
+        strategy.add(new DestroyMineStrategy());
         strategy.add(new FireStaticStrategy());
         strategy.add(new ClosestBarrelStrategy());
         strategy.add(new SimpleFireStrategy());
+        strategy.add(new GoToFightStrategy());
        // strategy.add(new BarrelFireStrategy());
-        //strategy.add(new StopStrategy());
+//        strategy.add(new StopStrategy());
 
         Scanner in = new Scanner(System.in);
 
         // game loop
         while (true) {
             currentTurn++;
+            knownMines.clear();
             gameState = new GameState();
 
             int myShipCount = in.nextInt(); // the number of remaining ships
@@ -56,10 +59,11 @@ class Player {
                 int isMine = in.nextInt();
 
                 if (entityType.equals("BARREL")) {
-                    Barrel barrel = new Barrel(entityId, x, y, rhumInShip);
+                    Barrel barrel = new Barrel(entityId, x, y, orientationOrBarrelRhumQuantity);
                     gameState.addBarrel(barrel);
                 } else if (entityType.equals("SHIP")) {
                     Ship ship = new Ship(entityId, x, y, shipSpeedOrCannonBallImpactDelay, orientationOrBarrelRhumQuantity);
+                    ship.rhum = rhumInShip;
                     gameState.addShip(ship, isMine);
                 } else if (entityType.equals("MINE")) {
                     Mine mine = new Mine(entityId, x, y);
@@ -155,19 +159,38 @@ class Player {
                 .findFirst();
         }
 
-        public Optional<Ship> findClosestShootableShipFrom(Ship ship) {
-            Ship closestShip = null;
-            double distanceFromClosestShip = -1;
+        Optional<Shoot> findBestShootFor(Ship ship, GameState gameState) {
+            Shoot shoot = null;
+            List<Ship> enemiesSortedByDistance = enemyShips.stream()
+                    .sorted((ship1, ship2) -> ship.distance(ship1) < ship.distance(ship2) ? -1 : 1)
+                    .collect(Collectors.toList());
 
-            for (Ship enemyShip : enemyShips) {
-                double distance = enemyShip.distance(ship.shipCoordinates().head);
+            for (Ship enemyShip : enemiesSortedByDistance) {
+                for (int i = 1; i <= 5; i++) {
+                    Ship enemyShipInNTurns = enemyShip.inNTurns(i);
+                    ShipCoordinates currentShipCoordinates = enemyShipInNTurns.shipCoordinates();
 
-                if ((closestShip == null || distance < distanceFromClosestShip) && distance <= MAX_SHOOTABLE_DISTANCE) {
-                    closestShip = enemyShip;
-                    distanceFromClosestShip = distance;
+                    int turnToCannonBallImpactHead = gameState.turnToCannonBallImpact(ship, currentShipCoordinates.head);
+                    int turnToCannonBallImpactCenter = gameState.turnToCannonBallImpact(ship, currentShipCoordinates.center);
+                    int turnToCannonBallImpactTail = gameState.turnToCannonBallImpact(ship, currentShipCoordinates.tail);
+
+                    if (turnToCannonBallImpactCenter == i && ship.distance(currentShipCoordinates.center) <= MAX_SHOOTABLE_DISTANCE) {
+                        shoot = new Shoot(enemyShip, currentShipCoordinates.center);
+                    } else if (turnToCannonBallImpactHead == i && ship.distance(currentShipCoordinates.head) <= MAX_SHOOTABLE_DISTANCE) {
+                        shoot = new Shoot(enemyShip, currentShipCoordinates.head);
+                    } else if (turnToCannonBallImpactTail == i && ship.distance(currentShipCoordinates.tail) <= MAX_SHOOTABLE_DISTANCE) {
+                        shoot = new Shoot(enemyShip, currentShipCoordinates.tail);
+                    }
+
+                    if (shoot != null) {
+                        break;
+                    }
+                }
+                if (shoot != null) {
+                    break;
                 }
             }
-            return Optional.ofNullable(closestShip);
+            return Optional.ofNullable(shoot);
         }
 
         Optional<Barrel> findClosestBarrel(Ship ship) {
@@ -255,7 +278,7 @@ class Player {
         }
 
         Optional<Path> pathTo(Coordinate destination, GameState gameState) {
-            return pathTo(destination, gameState, PathSearchMode.SAFE);
+            return pathTo(destination, gameState, PathSearchMode.UNSAFE);
         }
 
         boolean isRowPair() {
@@ -448,6 +471,7 @@ class Player {
     static class Ship extends Positioned {
         final int speed;
         final int orientation;
+        int rhum;
 
         Ship(int id, Coordinate coordinate, int speed, int orientation) {
             super(id, coordinate);
@@ -484,6 +508,20 @@ class Player {
         @Override
         public String toString() {
             return super.toString() + String.format("(id:%d, speed : %d, orientation: %d, coordinates: %s)", id, speed, orientation, shipCoordinates().asList().toString());
+        }
+
+        Ship inNTurns(int steps) {
+            Ship ship = this;
+
+            for (int j = 0; j < ship.speed; j++) {
+                for (int i = 0; i < steps; i++) {
+                    Coordinate shipHead = ship.shipCoordinates().head;
+                    if (shipHead.isValid()) {
+                        ship = new Ship(ship.id, shipHead, ship.speed, ship.orientation);
+                    }
+                }
+            }
+            return ship;
         }
     }
 
@@ -650,6 +688,7 @@ class Player {
 
         MoveAction(Coordinate coordinate) {
             this.coordinate = coordinate;
+            shipMoves.put(currentShip, coordinate);
         }
 
         public String execute() {
@@ -685,6 +724,12 @@ class Player {
     static class FasterAction implements Action {
         public String execute() {
             return "FASTER";
+        }
+    }
+
+    static class PortAction implements Action {
+        public String execute() {
+            return "PORT";
         }
     }
 
@@ -731,25 +776,15 @@ class Player {
                 Optional<Path> pathUnsafeOrNot = ship.pathTo(closestSafeBarrel, gameState, PathSearchMode.UNSAFE);
 
                 if (pathUnsafeOrNot.isPresent()) {
-//                    if (pathUnsafeOrNot.get().first(3).stream().anyMatch(coordinate -> gameState.hasMine(coordinate))) {
-//                        Optional<Path> pathSafeOrNot = ship.pathTo(closestSafeBarrel, gameState, PathSearchMode.SAFE);
-//                        if (pathSafeOrNot.isPresent()) {
-//                            log("detour");
-//                            action = new MoveAction(pathSafeOrNot.get().firstStep());
-//                        }
-//                    }
+                    boolean targetBarrelChanged = !closestSafeBarrel.equals(lastTargetedBarrels.get(ship.id));
+                    boolean shipIsInNotGoodDirection = !pathUnsafeOrNot.get().isNextStepStraightForward(ship);
 
-//                    if (action == null) {
-                        boolean targetBarrelChanged = !closestSafeBarrel.equals(lastTargetedBarrels.get(ship.id));
-                        boolean shipIsInNotGoodDirection = !pathUnsafeOrNot.get().isNextStepStraightForward(ship);
-                    log("shipIsInNotGoodDirection:"+shipIsInNotGoodDirection);
-                        if (targetBarrelChanged || shipIsInNotGoodDirection || ship.speed == 0) {
-                            lastTargetedBarrels.put(ship.id, closestSafeBarrel);
-                            action = new MoveAction(closestSafeBarrel.coordinate);
-                        } else {
-                            log("continuing");
-                        }
-//                    }
+                    if (targetBarrelChanged || shipIsInNotGoodDirection || ship.speed == 0) {
+                        lastTargetedBarrels.put(ship.id, closestSafeBarrel);
+                        action = new MoveAction(closestSafeBarrel.coordinate);
+                    } else {
+                        log("continuing");
+                    }
                 } else {
                     lastTargetedBarrels.remove(ship.id);
                 }
@@ -784,35 +819,30 @@ class Player {
         public Action getAction(Ship ship, GameState gameState) {
             Action action = null;
 
-            Integer lastFireTurn = lastFireTurns.get(ship.id);
-            if (lastFireTurn == null || lastFireTurn + FIRE_COOLDOWN < currentTurn) {
-                Optional<Ship> targetOrNot = gameState.findClosestShootableShipFrom(ship);
+            if (canShoot(ship)) {
+                Optional<Shoot> shootOrNot = gameState.findBestShootFor(ship, gameState);
 
-                if (targetOrNot.isPresent()) {
-                    Ship targetShip = targetOrNot.get();
-                    ShipCoordinates shipCoordinates = targetShip.shipCoordinates();
-
-                    Coordinate target;
-                    if (targetShip.speed == 0 || !shipCoordinates.head.isValid()) {
-                        target = shipCoordinates.center;
-                    } else {
-                        target = shipCoordinates.head;
-                    }
+                if (shootOrNot.isPresent()) {
                     lastFireTurns.put(ship.id, currentTurn);
                     log("SimpleFireStrategy");
-                    action = new FireAction(target);
+                    action = new FireAction(shootOrNot.get().coordinate);
                 }
             }
             return action;
         }
+
+    }
+
+    static boolean canShoot(Ship ship) {
+        Integer lastFireTurn = lastFireTurns.get(ship.id);
+        return lastFireTurn == null || lastFireTurn + FIRE_COOLDOWN < currentTurn;
     }
 
     static class BarrelFireStrategy implements Strategy {
         public Action getAction(Ship ship, GameState gameState) {
             Action action = null;
 
-            Integer lastFireTurn = lastFireTurns.get(ship.id);
-            if ((lastFireTurn == null || lastFireTurn + 1 < currentTurn) && !gameState.barrels.isEmpty()) {
+            if (canShoot(ship) && !gameState.barrels.isEmpty()) {
                 Optional<ShipAndBarrel> shipAndBarrelOptional = gameState.enemyShips.stream()
                         .map(enemyShip -> new ShipAndBarrel(enemyShip, gameState.findClosestBarrel(enemyShip).get()))
                         .filter(shipAndBarrel -> {
@@ -857,14 +887,48 @@ class Player {
                 if (ship.speed == 0) {
                     log("Targeted !! Move on");
 
-                    Coordinate escapeDestination;
                     if (shipCoordinates.head.isValid()) {
-                        escapeDestination = shipCoordinates.head;
+                        Optional<Ship> shipAtHead = gameState.getShipAt(shipCoordinates.head);
+                        if (shipAtHead.isPresent() && !shipAtHead.get().equals(ship)) {
+                            if (gameState.mines.contains(shipAtHead)) {
+                                new MoveAction(new Coordinate(10, 10));
+                            }
+                        } else {
+                            action = new FasterAction();
+                        }
                     }  else {
-                        escapeDestination = shipCoordinates.tail;
+                        action = new MoveAction(new Coordinate(10, 10));
                     }
-                    action = new MoveAction(escapeDestination);
+
                 }
+            }
+            return action;
+        }
+    }
+
+    static class EscapeCanonBallStrategyInCourse implements Strategy {
+
+        @Override
+        public Action getAction(Ship ship, GameState gameState) {
+            Action action = null;
+
+            boolean shipIsTargeted = false;
+
+            for(int i = 1; i < 3; i++) {
+                Ship currentShip = ship.inNTurns(i);
+                List<Coordinate> coordinates = currentShip.shipCoordinates().asList();
+
+                for (CannonBall cannonBall : gameState.cannonBalls) {
+                    if (coordinates.contains(cannonBall.target) && cannonBall.impactDelay == i) {
+                        shipIsTargeted = true;
+                        break;
+                    }
+                }
+            }
+
+            if (shipIsTargeted) {
+                log("EscapeCanonBallStrategyInCourse");
+                action = new PortAction();
             }
             return action;
         }
@@ -878,39 +942,138 @@ class Player {
         }
     }
 
-    static class MoveAwayStrategy implements Strategy {
-        @Override
-        public Action getAction(Ship ship, GameState gameState) {
-            boolean shouldMoveAway = ship.coordinate.neighbors().stream().anyMatch(coordinate -> {
-                Optional<Ship> shipAt = gameState.getShipAt(coordinate);
-                return shipAt.isPresent() && !shipAt.get().equals(ship);
-            });
-
-            if (shouldMoveAway) {
-                log("Moving away");
-                return new MoveAction(moveAwayDestination.get(ship.id));
-            } else {
-                return null;
-            }
-        }
-    }
+//    static class MoveAwayStrategy implements Strategy {
+//        @Override
+//        public Action getAction(Ship ship, GameState gameState) {
+//            boolean shouldMoveAway = ship.coordinate.neighbors().stream().anyMatch(coordinate -> {
+//                Optional<Ship> shipAt = gameState.getShipAt(coordinate);
+//                return shipAt.isPresent() && !shipAt.get().equals(ship);
+//            });
+//
+//            if (shouldMoveAway) {
+//                log("Moving away");
+//                return new MoveAction(moveAwayDestination.get(ship.id));
+//            } else {
+//                return null;
+//            }
+//        }
+//    }
 
     static class FireStaticStrategy implements Strategy {
         @Override
         public Action getAction(Ship ship, GameState gameState) {
-            Optional<Ship> staticShootableEnemyOrNot = gameState.enemyShips.stream()
-                    .filter(enemyShip -> {
-                        return  enemyShip.speed == 0 &&
-                                enemyShip.distance(ship.shipCoordinates().head) <= MAX_SHOOTABLE_DISTANCE;
-                    })
-                    .findFirst();
+            if (canShoot(ship)) {
+                Optional<Ship> staticShootableEnemyOrNot = gameState.enemyShips.stream()
+                        .filter(enemyShip -> {
+                            return  enemyShip.speed == 0 &&
+                                    enemyShip.distance(ship.shipCoordinates().head) <= MAX_SHOOTABLE_DISTANCE;
+                        })
+                        .findFirst();
 
-            if (staticShootableEnemyOrNot.isPresent()) {
-                log("FireStaticStrategy");
-                return new FireAction(staticShootableEnemyOrNot.get().coordinate);
-            } else {
-                return null;
+                if (staticShootableEnemyOrNot.isPresent()) {
+                    log("FireStaticStrategy");
+                    return new FireAction(staticShootableEnemyOrNot.get().coordinate);
+                }
             }
+            return null;
+        }
+    }
+
+    static class GoToFightStrategy implements Strategy {
+        @Override
+        public Action getAction(Ship ship, GameState gameState) {
+            int myRhum = gameState.myShips.stream().mapToInt(myShip -> myShip.rhum).sum();
+            System.err.println("myRhum:"+myRhum);
+            int enemyRhum = gameState.enemyShips.stream().mapToInt(myShip -> myShip.rhum).sum();
+            System.err.println("enemyRhum:"+enemyRhum);
+
+            if (myRhum < enemyRhum) {
+                Optional<Ship> enemyShipOrNot = gameState.enemyShips.stream().findFirst();
+                if (enemyShipOrNot.isPresent()) {
+
+                    log("GoToFightStrategy");
+                    return new MoveAction(enemyShipOrNot.get().coordinate);
+                }
+            }
+            return null;
+        }
+    }
+
+    static class DestroyMineStrategy implements Strategy {
+        @Override
+        public Action getAction(Ship ship, GameState gameState) {
+            if (canShoot(ship)) {
+                Coordinate shipTargetMove = shipMoves.get(ship);
+
+                if (shipTargetMove != null) {
+                    Optional<Path> path = ship.coordinate.pathTo(shipTargetMove, gameState);
+
+                    if (path.isPresent()) {
+                        List<Coordinate> shipAlreadyDestroyedMines = shipDestroyedMines.get(ship.id);
+                        if (shipAlreadyDestroyedMines == null) {
+                            shipAlreadyDestroyedMines = new ArrayList<>();
+                            shipDestroyedMines.put(ship.id, shipAlreadyDestroyedMines);
+                        }
+
+                        Coordinate runningStep = ship.coordinate;
+                        for (Coordinate step : path.get().steps) {
+                            int orientation = runningStep.orientationTo(step);
+                            Ship nextShipState = new Ship(ship.id, runningStep, ship.rhum, orientation);
+                            ShipCoordinates shipCoordinates = nextShipState.shipCoordinates();
+
+                            for (Coordinate coordinate : shipCoordinates.asList()) {
+
+                                if (!shipAlreadyDestroyedMines.contains(coordinate) && gameState.hasMine(coordinate) && ship.distance(coordinate) > 3) {
+                                    shipAlreadyDestroyedMines.add(coordinate);
+                                    log("DestroyMineStrategy");
+                                    lastFireTurns.put(ship.id, currentTurn);
+                                    return new FireAction(coordinate);
+                                }
+                            }
+                            runningStep = step;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+    }
+
+    static class DestroyMineOnEnemyStrategy implements Strategy {
+        @Override
+        public Action getAction(Ship ship, GameState gameState) {
+            if (canShoot(ship)) {
+                List<Mine> mineShootables = gameState.mines.stream()
+                        .filter(mine -> ship.shipCoordinates().head.distance(mine) <= MAX_SHOOTABLE_DISTANCE)
+                        .collect(Collectors.toList());
+
+                Mine selectedMine = null;
+                for (Mine mineShootable : mineShootables) {
+                    for (Ship enemyShip : gameState.enemyShips) {
+                        double distance = mineShootable.distance(enemyShip);
+                        if (distance <= 2) {
+                            selectedMine = mineShootable;
+                        }
+                    }
+                }
+
+                if (selectedMine != null) {
+                    log("DestroyMineOnEnemyStrategy");
+                    lastFireTurns.put(ship.id, currentTurn);
+                    return new FireAction(selectedMine.coordinate);
+                }
+            }
+            return null;
+        }
+    }
+
+    private static class Shoot {
+        private final Ship enemyShip;
+        private final Coordinate coordinate;
+
+        public Shoot(Ship enemyShip, Coordinate coordinate) {
+            this.enemyShip = enemyShip;
+            this.coordinate = coordinate;
         }
     }
 }

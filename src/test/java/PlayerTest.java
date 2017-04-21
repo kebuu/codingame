@@ -39,7 +39,7 @@ public class PlayerTest {
         Player.GameState gameState = new Player.GameState();
         gameState.enemyShips.add(ship1);
 
-        assertThat(gameState.findClosestShootableShipFrom(ship2)).isEmpty();
+        assertThat(gameState.findBestShootFor(ship2, gameState)).isEmpty();
     }
 
     @Test
@@ -59,6 +59,17 @@ public class PlayerTest {
 
         gameState.addAllMines(mines(xy(3, 0), xy(0,1)));
         assertThat(coordinate1.pathTo(coordinate2, gameState)).isEmpty();
+    }
+
+    @Test
+    public void testInTurn() {
+        Player.Ship ship0 = new Player.Ship(0, 10, 5, 0, 0);
+        Player.Ship ship1 = new Player.Ship(1, 15, 8, 1, 1);
+        Player.Ship ship2 = new Player.Ship(2, 9, 9, 2, 2);
+
+        assertThat(ship0.inNTurns(2).coordinate).isEqualTo(xy(10, 5));
+        assertThat(ship1.inNTurns(2).coordinate).isEqualTo(xy(16, 6));
+        assertThat(ship2.inNTurns(1).coordinate).isEqualTo(xy(8, 7));
     }
 
     @Test
@@ -122,11 +133,13 @@ public class PlayerTest {
 
     @Test
     public void testFireStrategy() {
-        Player.Ship ship = new Player.Ship(0, 2, 2, 0, 0);
+        Player.Ship ship = new Player.Ship(0, 3, 20, 0, 4);
         Player.currentTurn = 10;
         Player.GameState gameState = new Player.GameState();
 
-        gameState.addShip(new Player.Ship(0, 4, 4, 1, 0), 0);
+        gameState.addShip(new Player.Ship(0, 8, 5, 3, 4), 0);
+//        gameState.addShip(new Player.Ship(0, 10, 9, 0, 2), 0);
+//        gameState.addShip(new Player.Ship(0, 9, 7, 0, 0), 0);
         Player.FireAction action1 = (Player.FireAction) new Player.SimpleFireStrategy().getAction(ship, gameState);
         assertThat(action1.coordinate).isEqualTo(xy(5, 4));
 
