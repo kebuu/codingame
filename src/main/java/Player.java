@@ -36,7 +36,7 @@ class Player {
         strategy.add(new SimpleFireStrategy());
         strategy.add(new GoToFightStrategy());
        // strategy.add(new BarrelFireStrategy());
-//        strategy.add(new StopStrategy());
+        strategy.add(new AvoidMineStrategy());
 
         Scanner in = new Scanner(System.in);
 
@@ -117,10 +117,27 @@ class Player {
         }
 
         Optional<Barrel> findClosestSafeBarrel(Ship ship, Collection<Barrel> excludedBarrels) {
+            
              return barrels.stream()
                      .filter(barrel -> !excludedBarrels.contains(barrel))
                      .filter(barrel -> !gameState.hasMine(barrel.coordinate))
-                     .min(Comparator.comparing(barrel -> distance(barrel, ship)));
+                     .sorted(Comparator.comparing(barrel -> distance(barrel, ship)))
+                     .filter(barrel -> {
+                        Optional<Path> pathOrNot = ship.pathTo(barrel, gameState, PathSearchMode.UNSAFE);
+                        if(pathOrNot.isPresent()) {
+                            for(Coordinate step : pathOrNot.get().steps) { 
+                                for(Coordinate neighbor : step.neighbors()) { 
+                                    if(gameState.hasMine(neighbor)) {
+                                        return false;
+                                    }
+                                }
+                            }
+                        }
+                        return true;
+                         
+                     })
+                     .limit(1)
+                     .findFirst();
         }
 
         private boolean hasMine(Coordinate coordinate) {
@@ -934,11 +951,12 @@ class Player {
         }
     }
 
-    static class StopStrategy implements Strategy {
+    static class AvoidMineStrategy implements Strategy {
 
         @Override
         public Action getAction(Ship ship, GameState gameState) {
-            return new SlowerAction();
+            ShipCoordinates shipCoordinatesIn1Turn = ship.inNTurns(2).shipCoordinates();
+            return gameState.hasMine(shipCoordinatesIn1Turn.head) ? new PortAction() : null;
         }
     }
 
@@ -982,12 +1000,12 @@ class Player {
     static class GoToFightStrategy implements Strategy {
         @Override
         public Action getAction(Ship ship, GameState gameState) {
-            int myRhum = gameState.myShips.stream().mapToInt(myShip -> myShip.rhum).sum();
-            System.err.println("myRhum:"+myRhum);
-            int enemyRhum = gameState.enemyShips.stream().mapToInt(myShip -> myShip.rhum).sum();
-            System.err.println("enemyRhum:"+enemyRhum);
+            int myMaxRhum = gameState.myShips.stream().mapToInt(myShip -> myShip.rhum).max().getAsInt();
+            System.err.println("myRhum:"+myMaxRhum);
+            int enemyMaxRhum = gameState.enemyShips.stream().mapToInt(myShip -> myShip.rhum).max().getAsInt();
+            System.err.println("enemyRhum:"+enemyMaxRhum);
 
-            if (myRhum < enemyRhum) {
+            if (myMaxRhum < enemyMaxRhum) {
                 Optional<Ship> enemyShipOrNot = gameState.enemyShips.stream().findFirst();
                 if (enemyShipOrNot.isPresent()) {
 
@@ -1023,7 +1041,7 @@ class Player {
 
                             for (Coordinate coordinate : shipCoordinates.asList()) {
 
-                                if (!shipAlreadyDestroyedMines.contains(coordinate) && gameState.hasMine(coordinate) && ship.distance(coordinate) > 3) {
+                                if (!shipAlreadyDestroyedMines.contains(coordinate) && gameState.hasMine(coordinate) && ship.distance(coordinate) > 6) {
                                     shipAlreadyDestroyedMines.add(coordinate);
                                     log("DestroyMineStrategy");
                                     lastFireTurns.put(ship.id, currentTurn);
@@ -1051,7 +1069,7 @@ class Player {
                 for (Mine mineShootable : mineShootables) {
                     for (Ship enemyShip : gameState.enemyShips) {
                         double distance = mineShootable.distance(enemyShip);
-                        if (distance <= 2) {
+                        if (distance <= 3) {
                             selectedMine = mineShootable;
                         }
                     }
