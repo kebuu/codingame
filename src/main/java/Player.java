@@ -190,7 +190,7 @@ class Player {
         Optional<Shoot> findBestShootFor(Ship ship, GameState gameState) {
             Shoot shoot = null;
             List<Ship> enemiesSortedByDistance = enemyShips.stream()
-                    .sorted((ship1, ship2) -> ship.distance(ship1) < ship.distance(ship2) ? -1 : 1)
+                    .sorted((ship1, ship2) -> ship1.rhum < ship2.rhum ? -1 : 1)
                     .collect(Collectors.toList());
 
             for (Ship enemyShip : enemiesSortedByDistance) {
