@@ -105,16 +105,17 @@ class Player {
             Optional<? extends Action> execute(Spawn spawn, GameState gameState) {
                 int spawnHeight = gameState.getHeight(spawn);
 
-                List<Cell> cells = gameState.getNeighbourCells(spawn).stream()
-                        .filter(cell -> cell.height <= spawnHeight + 1)
-                        .sorted(Comparator.comparingInt(Cell::getHeight).reversed())
-                        .collect(Collectors.toList());
-
-                return cells.stream()
+                return gameState.accessibleCells(spawn).stream()
+                    .filter(cell -> cell.height <= spawnHeight + 1)
+                    .sorted(Comparator.comparingInt(Cell::getHeight).reversed())
                     .flatMap(movingToCell -> {
-                        return gameState.getNeighbourCells(movingToCell).stream()
-                            .filter(cell -> cell.height <= movingToCell.height)
-                            .sorted(Comparator.comparingInt(Cell::getHeight).reversed())
+                        List<Cell> sorted = gameState.buildableCells(movingToCell, spawn).stream()
+                                .filter(cell -> cell.height <= movingToCell.height)
+                                .sorted(Comparator.comparingInt(Cell::getHeight).reversed())
+                                .collect(Collectors.toList());
+
+                        log(sorted);
+                        return sorted.stream()
                             .limit(1)
                             .map(buildCell -> {
                                 log(movingToCell, buildCell);
@@ -134,7 +135,7 @@ class Player {
                     .limit(1)
                     .flatMap(cellToBuild -> {
                         return gameState.accessibleCells(spawn).stream()
-                            .filter(accessibleCell -> gameState.buildableCells(accessibleCell).contains(cellToBuild))
+                            .filter(accessibleCell -> gameState.buildableCells(accessibleCell, spawn).contains(cellToBuild))
                             .limit(1)
                             .map(accessibleCell -> {
                                 Direction moveDirection = getDirection(spawn, accessibleCell);
@@ -225,7 +226,7 @@ class Player {
         }
 
         List<Cell> getAccessibleThirdLevelCells(Spawn spawn) {
-            return getNeighbourCells(spawn).stream()
+            return accessibleCells(spawn).stream()
                 .filter(cell -> cell.height == 3 && getHeight(spawn) == 2)
                 .collect(Collectors.toList());
         }
@@ -239,8 +240,9 @@ class Player {
                     .collect(Collectors.toList());
         }
 
-        List<Cell> buildableCells(WithCoordinate withCoordinate) {
+        List<Cell> buildableCells(WithCoordinate withCoordinate, Spawn builder) {
             List<Coordinate> spawnsCoordinate = getSpawnsCoordinate();
+            spawnsCoordinate.remove(builder.coordinate);
 
             return getNeighbourCells(withCoordinate).stream()
                     .filter(cell -> !spawnsCoordinate.contains(cell.coordinate))
@@ -249,7 +251,7 @@ class Player {
 
         List<Coordinate> getSpawnsCoordinate() {
             return Stream.concat(mySpawns.stream(), enemySpawns.stream())
-                        .map(spawn1 -> spawn1.coordinate)
+                        .map(spawn -> spawn.coordinate)
                         .collect(Collectors.toList());
         }
     }
