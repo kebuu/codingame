@@ -1,5 +1,4 @@
 import java.util.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -16,20 +15,22 @@ class Player {
         int size = in.nextInt();
         int unitsPerPlayer = in.nextInt();
 
-        List<Cell> cells = new ArrayList<>();
-        List<Spawn> mySpawns = new ArrayList<>();
-        List<Spawn> enemySpawns = new ArrayList<>();
-        List<Action> allLegalActions = new ArrayList<>();
-
         // game loop
         while (true) {
+            List<List<Cell>> cells = new ArrayList<>();
+            List<Spawn> mySpawns = new ArrayList<>();
+            List<Spawn> enemySpawns = new ArrayList<>();
+            List<Action> allLegalActions = new ArrayList<>();
+
             for (int rowIndex = 0; rowIndex < size; rowIndex++) {
                 String row = in.next();
+                List<Cell> cellsInRow = new ArrayList<>();
+                cells.add(cellsInRow);
 
                 for(int colIndex = 0; colIndex < row.length();colIndex++) {
                     char cellHeightAsString = row.charAt(colIndex);
                     int cellHeight = cellHeightAsString == '.' ? CELL_HOLE_HEIGHT : Integer.parseInt(String.valueOf(cellHeightAsString));
-                    cells.add(new Cell(cellHeight, new Coordinate(rowIndex, colIndex)));
+                    cellsInRow.add(new Cell(cellHeight, new Coordinate(rowIndex, colIndex)));
                 }
             }
             for (int i = 0; i < unitsPerPlayer; i++) {
@@ -52,9 +53,8 @@ class Player {
                 allLegalActions.add(new Action.LegalAction(String.format("%s %d %s %s", atype, index, dir1, dir2)));
             }
 
-            log(allLegalActions);
-
             GameState gameState = new GameState(mySpawns, enemySpawns, new BoardState(cells), allLegalActions);
+            log(gameState);
 
             List<Strategy> strategies = new ArrayList<>();
             strategies.add(new Strategy.FirstLegalActionStrategy());
@@ -66,7 +66,10 @@ class Player {
                         .findFirst()
                         .orElse(Optional.empty());
 
-                nextAction.ifPresent(action -> System.out.println(action.execute()));
+                nextAction.ifPresent(action -> {
+                    log(action.execute());
+                    System.out.println(action.execute());
+                });
             }
 
             // Write an action using System.out.println()
@@ -86,13 +89,42 @@ class Player {
             this.boardState = boardState;
             this.legalActions = allLegalActions;
         }
+
+        @Override
+        public String toString() {
+            return "GameState{" +
+                    "mySpawns=" + mySpawns +
+                    "\n enemySpawns=" + enemySpawns +
+                    "\n boardState=\n" + boardState +
+                    '}';
+        }
     }
 
     static class BoardState {
-        final Map<Coordinate, Cell> cellByCoordinate;
+        final List<List<Cell>> cells;
 
-        BoardState(List<Cell> cells) {
-            cellByCoordinate = cells.stream().collect(Collectors.toMap(Cell::getCoordinate, Function.identity()));
+        BoardState(List<List<Cell>> cells) {
+            this.cells = cells;
+        }
+
+        Cell getCellAt(Coordinate coordinate) {
+            return cells.get(coordinate.row).get(coordinate.col);
+        }
+
+        public String toString() {
+            return cells.stream()
+                .map(this::toStringRow)
+                .collect(Collectors.joining("\n"));
+        }
+
+        public String toStringRow(List<Cell> rowCells) {
+            return rowCells.stream()
+                    .map(this::toStringCell)
+                    .collect(Collectors.joining());
+        }
+
+        public String toStringCell(Cell cell) {
+            return cell.isHole() ? "." : String.valueOf(cell.height);
         }
     }
 
@@ -130,6 +162,15 @@ class Player {
             String execute() {
                 return String.format("MOVE&BUILD %d %s %s", spawnIndex, moveDirection, buildDirection);
             }
+
+            @Override
+            public String toString() {
+                return "MoveBuildAction{" +
+                        "spawnIndex=" + spawnIndex +
+                        ", moveDirection=" + moveDirection +
+                        ", buildDirection=" + buildDirection +
+                        "} " + super.toString();
+            }
         }
 
         static class LegalAction extends Action{
@@ -142,6 +183,13 @@ class Player {
 
             String execute() {
                 return legalAction;
+            }
+
+            @Override
+            public String toString() {
+                return "LegalAction{" +
+                        "legalAction='" + legalAction + '\'' +
+                        "} " + super.toString();
             }
         }
     }
@@ -211,7 +259,7 @@ class Player {
 
     static void log(Object... objects) {
         if (isLogEnabled) {
-            String log = Arrays.stream(objects).map(Object::toString).collect(Collectors.joining(","));
+            String log = Arrays.stream(objects).map(Object::toString).collect(Collectors.joining("\n"));
             System.err.print(log);
         }
     }
