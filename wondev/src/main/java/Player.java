@@ -58,8 +58,8 @@ class Player {
             log(gameState);
 
             List<Strategy> strategies = new ArrayList<>();
+            strategies.add(new Strategy.PushStrategy());
             strategies.add(new Strategy.GoToThirdLevelStrategy());
-            strategies.add(new Strategy.PreventFailStrategy());
             strategies.add(new Strategy.SimpleClimbStrategy());
             strategies.add(new Strategy.FirstLegalActionStrategy());
 
@@ -80,6 +80,10 @@ class Player {
                     log(action.execute());
                     System.out.println(action.execute());
                 });
+
+                if (nextAction.isPresent()) {
+                    break;
+                }
             }
 
             // Write an action using System.out.println()
@@ -92,12 +96,41 @@ class Player {
 
         static class GoToThirdLevelStrategy extends Strategy {
             Optional<? extends Action> execute(Spawn spawn, GameState gameState) {
-                Optional<Cell> accessibleThirdLevelCell = gameState.getAccessibleThirdLevelCells(spawn).stream().findFirst();
-                return accessibleThirdLevelCell
-                    .map(cell ->  {
-                        Direction direction = getDirection(spawn, cell);
-                        return new Action.MoveBuildAction(spawn.index, direction, direction.opposite());
-                    });
+
+                return gameState.getAccessibleThirdLevelCells(spawn).stream()
+                    .flatMap(thirdLevelCell -> {
+                        return gameState.buildableCells(thirdLevelCell, spawn).stream()
+                        .map(buildableCell -> new MoveBuildCandidate(spawn, thirdLevelCell, buildableCell));
+                    })
+                    .max(Comparator.comparing(gameState::score))
+                    .map(MoveBuildCandidate::toMoveBuildAction);
+            }
+        }
+
+        static class PushStrategy extends Strategy {
+            Optional<? extends Action> execute(Spawn spawn, GameState gameState) {
+
+                return gameState.pushableEnemies(spawn).stream()
+                    .flatMap(enemySpawn -> {
+                        Direction targetSpawnDirection = getDirection(spawn, enemySpawn);
+
+                        List<Direction> pushableDirections = new ArrayList<>();
+                        pushableDirections.add(targetSpawnDirection);
+                        pushableDirections.addAll(targetSpawnDirection.siblings());
+
+                        return pushableDirections.stream()
+                                .filter(direction -> enemySpawn.coordinateTo(direction).isInBoard(gameState.size))
+                                .map(direction -> {
+                            Coordinate targetPushCoordinate = enemySpawn.coordinateTo(direction);
+                            log(targetPushCoordinate);
+                            Cell targetPush = gameState.boardState.getCellAt(targetPushCoordinate);
+                            return new PushBuildCandidate(spawn, enemySpawn, targetPush);
+                        })
+                        .filter(pushBuildCandidate -> pushBuildCandidate.pushTo.height == 0 || pushBuildCandidate.pushTo.height == 1)
+                        .filter(pushBuildCandidate -> !gameState.getSpawnsCoordinate().contains(pushBuildCandidate.pushTo.coordinate));
+                    })
+                    .min(Comparator.comparingInt(pushBuildCandidate -> pushBuildCandidate.pushTo.height))
+                    .map(PushBuildCandidate::toPushBuildAction);
             }
         }
 
@@ -106,44 +139,21 @@ class Player {
                 int spawnHeight = gameState.getHeight(spawn);
 
                 return gameState.accessibleCells(spawn).stream()
-                    .filter(cell -> cell.height <= spawnHeight + 1)
-                    .sorted(Comparator.comparingInt(Cell::getHeight).reversed())
-                    .flatMap(movingToCell -> {
-                        List<Cell> sorted = gameState.buildableCells(movingToCell, spawn).stream()
-                                .filter(cell -> cell.height <= movingToCell.height)
-                                .sorted(Comparator.comparingInt(Cell::getHeight).reversed())
-                                .collect(Collectors.toList());
-
-                        log(sorted);
-                        return sorted.stream()
-                            .limit(1)
-                            .map(buildCell -> {
-                                log(movingToCell, buildCell);
-                                Direction moveDirection = getDirection(spawn, movingToCell);
-                                Direction buildDirection = getDirection(movingToCell, buildCell);
-                                return new Action.MoveBuildAction(spawn, moveDirection, buildDirection);
-                            });
-                    })
-                    .findFirst();
-            }
-        }
-
-        static class PreventFailStrategy extends Strategy {
-            Optional<? extends Action> execute(Spawn spawn, GameState gameState) {
-                return gameState.enemySpawns.stream()
-                    .flatMap(enemySpawn -> gameState.getAccessibleThirdLevelCells(enemySpawn).stream())
-                    .limit(1)
-                    .flatMap(cellToBuild -> {
-                        return gameState.accessibleCells(spawn).stream()
-                            .filter(accessibleCell -> gameState.buildableCells(accessibleCell, spawn).contains(cellToBuild))
-                            .limit(1)
-                            .map(accessibleCell -> {
-                                Direction moveDirection = getDirection(spawn, accessibleCell);
-                                Direction buildDirection = getDirection(accessibleCell, cellToBuild);
-                                return new Action.MoveBuildAction(spawn.index, moveDirection, buildDirection);
-                            });
-                    })
-                    .findFirst();
+                        .filter(cell -> cell.height <= spawnHeight + 1)
+                        .sorted(Comparator.comparingInt(Cell::getHeight).reversed())
+                        .flatMap(movingToCell -> {
+                            return gameState.buildableCells(movingToCell, spawn).stream()
+                                    .filter(cell -> cell.height <= movingToCell.height)
+                                    .sorted(Comparator.comparingInt(Cell::getHeight).reversed())
+                                    .limit(1)
+                                    .map(buildCell -> {
+                                        log(movingToCell, buildCell);
+                                        Direction moveDirection = getDirection(spawn, movingToCell);
+                                        Direction buildDirection = getDirection(movingToCell, buildCell);
+                                        return new Action.MoveBuildAction(spawn, moveDirection, buildDirection);
+                                    });
+                        })
+                        .findFirst();
             }
         }
 
@@ -195,6 +205,7 @@ class Player {
 
         GameState withAction(Spawn spawn, Action.MoveBuildAction moveBuildAction, boolean myAction) {
             Spawn movedSpawn = new Spawn(spawn.index, spawn.coordinateTo(moveBuildAction.moveDirection));
+            log(moveBuildAction, movedSpawn, movedSpawn.coordinateTo(moveBuildAction.buildDirection));
             Cell cellToUpgrade = boardState.getCellAt(movedSpawn.coordinateTo(moveBuildAction.buildDirection));
 
             List<Spawn> updatedSpawnList = new ArrayList<>();
@@ -209,9 +220,9 @@ class Player {
             }
 
             if (myAction) {
-                return new GameState(size, updatedSpawnList, enemySpawns, boardState.upgradingCellAt(cellToUpgrade.coordinate), legalActions);
+                return new GameState(size, updatedSpawnList, enemySpawns, boardState.upgradingCellAt(cellToUpgrade.coordinate), new ArrayList<>());
             } else {
-                return new GameState(size, mySpawns, updatedSpawnList, boardState.upgradingCellAt(cellToUpgrade.coordinate), legalActions);
+                return new GameState(size, mySpawns, updatedSpawnList, boardState.upgradingCellAt(cellToUpgrade.coordinate), new ArrayList<>());
 
             }
         }
@@ -240,6 +251,17 @@ class Player {
                     .collect(Collectors.toList());
         }
 
+        List<Spawn> pushableEnemies(Spawn spawn) {
+            return getNeighbourCells(spawn).stream()
+                    .filter(cell -> cell.height <= getHeight(spawn) + 1)
+                    .flatMap(cell -> {
+                        return enemySpawns.stream()
+                                .filter(enemySpawn -> enemySpawn.coordinate.equals(cell.coordinate))
+                                .filter(enemySpawn -> getHeight(enemySpawn) >= 2);
+                    })
+                    .collect(Collectors.toList());
+        }
+
         List<Cell> buildableCells(WithCoordinate withCoordinate, Spawn builder) {
             List<Coordinate> spawnsCoordinate = getSpawnsCoordinate();
             spawnsCoordinate.remove(builder.coordinate);
@@ -253,6 +275,49 @@ class Player {
             return Stream.concat(mySpawns.stream(), enemySpawns.stream())
                         .map(spawn -> spawn.coordinate)
                         .collect(Collectors.toList());
+        }
+
+        Long score(MoveBuildCandidate candidate) {
+            long moveToCellLevel3Bonus = candidate.moveTo.height == 3 ? 5 : 0;
+
+            long botherEnemies = enemySpawns.stream()
+                    .flatMap(spawn -> accessibleCells(spawn).stream())
+                    .filter(cell -> cell.coordinate.equals(candidate.moveTo.coordinate) || cell.coordinate.equals(candidate.build.coordinate))
+                    .count();
+
+            GameState gameWithCandidateAction = withAction(candidate.spawn, candidate.toMoveBuildAction(), true);
+            long helpedEnemies = enemySpawns.stream()
+                    .flatMap(spawn -> gameWithCandidateAction.accessibleCells(spawn).stream())
+                    .filter(cell -> cell.coordinate.equals(candidate.build.coordinate))
+                    .count();
+
+            long helpedFriends = mySpawns.stream()
+                    .flatMap(spawn -> gameWithCandidateAction.accessibleCells(spawn).stream())
+                    .filter(cell -> cell.coordinate.equals(candidate.build.coordinate))
+                    .count();
+
+            long lockEnemies = enemySpawns.stream()
+                    .filter(spawn -> gameWithCandidateAction.accessibleCells(spawn).size() == 0)
+                    .count();
+
+            long lockFriends = mySpawns.stream()
+                    .filter(spawn -> gameWithCandidateAction.accessibleCells(spawn).size() == 0)
+                    .count();
+
+            long enemySpawnAccessibleThirdLevelCells = enemySpawns.stream()
+                    .flatMap(spawn -> gameWithCandidateAction.getAccessibleThirdLevelCells(spawn).stream())
+                    .count();
+
+            long mySpawnAccessibleThirdLevelCells = mySpawns.stream()
+                    .flatMap(spawn -> gameWithCandidateAction.getAccessibleThirdLevelCells(spawn).stream())
+                    .count();
+
+            long score = botherEnemies - helpedEnemies + helpedFriends + (lockEnemies - lockFriends) * 10 +
+                    moveToCellLevel3Bonus + candidate.moveTo.height +
+                    (enemySpawnAccessibleThirdLevelCells + 1 - mySpawnAccessibleThirdLevelCells);
+            log("candidate", candidate);
+            log("score", score);
+            return score;
         }
     }
 
@@ -336,6 +401,36 @@ class Player {
             }
         }
 
+        static class PushBuildAction extends Action{
+
+            final int spawnIndex;
+            final Direction targetSpawnDirection;
+            final Direction pushDirection;
+
+            PushBuildAction(int spawnIndex, Direction targetSpawnDirection, Direction pushDirection) {
+                this.spawnIndex = spawnIndex;
+                this.targetSpawnDirection = targetSpawnDirection;
+                this.pushDirection = pushDirection;
+            }
+
+            PushBuildAction(Spawn spawn, Direction targetSpawnDirection, Direction pushDirection) {
+                this(spawn.index, targetSpawnDirection, pushDirection);
+            }
+
+            String execute() {
+                return String.format("PUSH&BUILD %d %s %s", spawnIndex, targetSpawnDirection, pushDirection);
+            }
+
+            @Override
+            public String toString() {
+                return "PushBuildAction{" +
+                        "spawnIndex=" + spawnIndex +
+                        ", targetSpawnDirection=" + targetSpawnDirection +
+                        ", pushDirection=" + pushDirection +
+                        "} " + super.toString();
+            }
+        }
+
         static class LegalAction extends Action{
 
             final String legalAction;
@@ -394,6 +489,10 @@ class Player {
             int result = row;
             result = 31 * result + col;
             return result;
+        }
+
+        boolean isInBoard(int size) {
+            return row >= 0 && col >= 0 && row < size && col < size;
         }
     }
 
@@ -464,13 +563,13 @@ class Player {
             Coordinate coordinateAt = coordinate;
 
             if (directionAsString.contains(Direction.N.name())) {
-                coordinateAt = coordinateAt.plusCol(1);
+                coordinateAt = coordinateAt.plusRow(-1);
             }
             if (directionAsString.contains(Direction.S.name())) {
-                coordinateAt = coordinateAt.plusCol(-1);
+                coordinateAt = coordinateAt.plusRow(1);
             }
             if (directionAsString.contains(Direction.E.name())) {
-                coordinateAt = coordinateAt.plusRow(1);
+                coordinateAt = coordinateAt.plusCol(1);
             }
             if (directionAsString.contains(Direction.W.name())) {
                 coordinateAt = coordinateAt.plusCol(-1);
@@ -502,43 +601,112 @@ class Player {
             Direction opposite() {
                 return S;
             }
+
+            List<Direction> siblings() {
+                return Arrays.asList(NE, NW);
+            }
         },S {
             Direction opposite() {
                 return N;
+            }
+
+            List<Direction> siblings() {
+                return Arrays.asList(SE, SW);
             }
         },E {
             Direction opposite() {
                 return W;
             }
+
+            List<Direction> siblings() {
+                return Arrays.asList(SE, NE);
+            }
         },W {
             Direction opposite() {
                 return E;
+            }
+
+            List<Direction> siblings() {
+                return Arrays.asList(NW, SW);
             }
         },SE {
             Direction opposite() {
                 return NW;
             }
+
+            List<Direction> siblings() {
+                return Arrays.asList(E, S);
+            }
         },SW {
             Direction opposite() {
                 return NE;
+            }
+
+            List<Direction> siblings() {
+                return Arrays.asList(S, W);
             }
         },NE {
             Direction opposite() {
                 return SW;
             }
+
+            List<Direction> siblings() {
+                return Arrays.asList(E, N);
+            }
         },NW {
             Direction opposite() {
                 return SE;
             }
+
+            List<Direction> siblings() {
+                return Arrays.asList(N, W);
+            }
         };
 
         abstract Direction opposite();
+        abstract List<Direction> siblings();
     }
 
     static void log(Object... objects) {
         if (isLogEnabled) {
             String log = Arrays.stream(objects).map(Object::toString).collect(Collectors.joining("\n"));
             System.err.print(log + "\n");
+        }
+    }
+
+    static class MoveBuildCandidate {
+        final Spawn spawn;
+        final Cell moveTo;
+        final Cell build;
+
+        MoveBuildCandidate(Spawn spawn, Cell moveTo, Cell build) {
+            this.spawn = spawn;
+            this.moveTo = moveTo;
+            this.build = build;
+        }
+
+        Action.MoveBuildAction toMoveBuildAction() {
+            Direction moveToDirection = getDirection(spawn, moveTo);
+            Direction buildToDirection = getDirection(moveTo, build);
+            return new Action.MoveBuildAction(spawn, moveToDirection, buildToDirection);
+        }
+    }
+
+    static class PushBuildCandidate {
+        final Spawn spawn;
+        final Spawn targetSpawn;
+        final Cell pushTo;
+
+        PushBuildCandidate(Spawn spawn, Spawn targetSpawn, Cell pushTo) {
+            this.spawn = spawn;
+            this.targetSpawn = targetSpawn;
+            this.pushTo = pushTo;
+        }
+
+        Action.PushBuildAction toPushBuildAction() {
+            Direction targetSpawnDirection = getDirection(spawn, targetSpawn);
+            Direction pushToDirection = getDirection(targetSpawn, pushTo);
+            return new Action.PushBuildAction(spawn, targetSpawnDirection, pushToDirection);
         }
     }
 }
