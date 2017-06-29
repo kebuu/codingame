@@ -59,24 +59,35 @@ class Player {
             log(gameState);
 
             List<Strategy> strategies = new ArrayList<>();
-            strategies.add(new Strategy.PushStrategy());
-            strategies.add(new Strategy.GoToThirdLevelStrategy());
+            //strategies.add(new Strategy.GoToThirdLevelStrategy());
             strategies.add(new Strategy.SimpleClimbStrategy(true));
             strategies.add(new Strategy.SimpleClimbStrategy(false));
-            strategies.add(new Strategy.FirstLegalActionStrategy());
 
             boolean played = false;
 
-            for (Strategy strategy : strategies) {
-                if(!played) {
-                    List<Spawn> sortedSpawn = gameState.mySpawns.stream()
-                            .sorted(Comparator.comparingInt(spawn -> {
-                                List<Cell> accessibleCells = gameState.accessibleCells(spawn);
-                                return accessibleCells.size() < 2 ? -1 : 0;
-                            }))
-                            .collect(Collectors.toList());
+            List<Spawn> sortedSpawn = gameState.mySpawns.stream()
+                    .sorted(Comparator.comparingInt(spawn -> {
+                        List<Cell> accessibleCells = gameState.accessibleCells(spawn);
+                        return accessibleCells.size() < 3 ? -1 : 0;
+                    }))
+                    .collect(Collectors.toList());
 
-                    for (Spawn mySpawn : sortedSpawn) {
+            Strategy.PushStrategy pushStrategy = new Strategy.PushStrategy();
+            for (Spawn mySpawn : sortedSpawn) {
+                Optional<? extends Action> optionalAction = pushStrategy.execute(mySpawn, gameState);
+
+                if (optionalAction.isPresent()) {
+                    Action action = optionalAction.get();
+                    log(pushStrategy, action.execute(), mySpawn);
+                    played = true;
+                    System.out.println(action.execute());
+                    break;
+                }
+            }
+
+            for (Spawn mySpawn : sortedSpawn) {
+                for (Strategy strategy : strategies) {
+                    if(!played) {
                         Optional<? extends Action> optionalAction = strategy.execute(mySpawn, gameState);
 
                         if (optionalAction.isPresent()) {
@@ -86,6 +97,20 @@ class Player {
                             System.out.println(action.execute());
                             break;
                         }
+                    }
+                }
+            }
+
+            if (!played) {
+                Strategy.FirstLegalActionStrategy firstLegalActionStrategy = new Strategy.FirstLegalActionStrategy();
+                for (Spawn mySpawn : sortedSpawn) {
+                    Optional<? extends Action> optionalAction = firstLegalActionStrategy.execute(mySpawn, gameState);
+
+                    if (optionalAction.isPresent()) {
+                        Action action = optionalAction.get();
+                        log(firstLegalActionStrategy, action.execute(), mySpawn);
+                        System.out.println(action.execute());
+                        break;
                     }
                 }
             }
@@ -101,12 +126,11 @@ class Player {
         static class GoToThirdLevelStrategy extends Strategy {
             Optional<? extends Action> execute(Spawn spawn, GameState gameState) {
 
-                List<Action.MoveBuildAction> moveBuildActionStream = gameState.getAccessibleThirdLevelCells(spawn).stream()
+                List<Action.MoveBuildAction> moveBuildActionList = gameState.getAccessibleThirdLevelCells(spawn).stream()
                         .flatMap(thirdLevelCell -> {
                             return gameState.buildableCells(thirdLevelCell, spawn).stream()
                                     .map(buildableCell -> new MoveBuildCandidate(spawn, thirdLevelCell, buildableCell));
                         })
-                        //.max(Comparator.comparing(gameState::score))
                         .map(MoveBuildCandidate::toMoveBuildAction)
                         .filter(moveBuildAction -> {
                             GameState gameStateWithAction = gameState.withAction(spawn, moveBuildAction, true);
@@ -115,25 +139,32 @@ class Player {
                             return cells.size() > 0;
                         }).collect(Collectors.toList());
 
-                return moveBuildActionStream.stream()
+                return moveBuildActionList.stream()
                     .sorted(Comparator.comparingInt(moveBuildAction -> {
                         GameState gameStateWithAction = gameState.withAction(spawn, moveBuildAction, true);
                         Spawn updatedSpawn = gameStateWithAction.getMySpawn(spawn.index);
                         Coordinate builtCellCoordinate = updatedSpawn.coordinateTo(moveBuildAction.buildDirection);
                         Cell builtCell = gameStateWithAction.boardState.getCellAt(builtCellCoordinate);
 
+                        int isOnBorderValue = gameState.isOnBorder(updatedSpawn.coordinate) ? -1 : 1;
+
                         if (builtCell.height == 3 && gameState.enemySpawns.stream()
-                                .flatMap(enemy -> gameState.getNeighbourCells(enemy).stream())
+                                .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
                                 .noneMatch(cell -> cell.equals(builtCell))) {
-                            return -100;
-                        } else if (gameState.getLockedEnemies() > gameStateWithAction.getLockedEnemies()) {
+                            return -100 + isOnBorderValue + gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
+                        } else if (builtCell.height == 4 && gameState.enemySpawns.stream()
+                                .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
+                                .noneMatch(cell -> cell.equals(builtCell))) {
+                            int overallAccessibleCells = gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
+                            return 100 + overallAccessibleCells;
+                        } else if (gameState.getLockedEnemies() < gameStateWithAction.getLockedEnemies()) {
                             return -1000;
                         } else if (gameState.enemySpawns.stream()
-                                .flatMap(enemy -> gameState.getNeighbourCells(enemy).stream())
+                                .flatMap(enemy -> gameStateWithAction.getNeighbourCells(enemy).stream())
                                 .anyMatch(cell -> cell.coordinate.equals(updatedSpawn.coordinate))) {
                             return 10;
                         } else {
-                            return gameStateWithAction.accessibleCells(updatedSpawn).size() * -1;
+                            return isOnBorderValue + gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
                         }
                     }))
                     .findFirst();
@@ -169,7 +200,7 @@ class Player {
                         GameState gameStateWithAction = gameState.withAction(spawn, pushBuildCandidate);
                         Spawn updatedSpawn = gameStateWithAction.getMySpawn(spawn.index);
                         int accessibleCells = gameStateWithAction.accessibleCells(updatedSpawn).size();
-                        return accessibleCells > 1;
+                        return accessibleCells > 0;
                     })
                     .min((pushBuildCandidate1, pushBuildCandidate2) -> {
                         Action.PushBuildAction pushBuildAction1 = pushBuildCandidate1.toPushBuildAction();
@@ -204,7 +235,6 @@ class Player {
                         .filter(cell -> alwaysUp ^ cell.height < spawnHeight)
                         .sorted(Comparator.comparingInt(Cell::getHeight).reversed()).collect(Collectors.toList());
 
-                log(cells1, sorted1, alwaysUp, spawnHeight);
                 return sorted1.stream()
                         .flatMap(movingToCell -> {
                             List<Cell> sorted = gameState.buildableCells(movingToCell, spawn).stream()
@@ -235,27 +265,32 @@ class Player {
                                         Spawn updatedSpawn = gameStateWithAction.getMySpawn(spawn.index);
                                         Cell updatedCell = gameStateWithAction.boardState.getCellAt(updatedSpawn.coordinateTo(moveBuildAction.buildDirection));
 
-                                        List<Cell> cells = gameStateWithAction.accessibleCells(updatedSpawn);
+                                        int isOnBorderValue = gameState.isOnBorder(updatedSpawn.coordinate) ? -1 : 1;
 
                                         if (updatedCell.height == 3 && gameState.enemySpawns.stream()
-                                                .flatMap(enemy -> gameState.getNeighbourCells(enemy).stream())
+                                                .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
                                                 .noneMatch(cell -> cell.equals(updatedCell))) {
-                                            return -100;
-                                        } else if (gameState.getLockedEnemies() > gameStateWithAction.getLockedEnemies()) {
+                                            return -100 + isOnBorderValue + gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
+                                        } else if (updatedCell.height == 4 && gameState.enemySpawns.stream()
+                                                .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
+                                                .noneMatch(cell -> cell.equals(updatedCell))) {
+                                            int overallAccessibleCells = gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
+                                            return 100 + overallAccessibleCells;
+                                        } else if (gameState.getLockedEnemies() < gameStateWithAction.getLockedEnemies()) {
                                             return -1000;
                                         } else if (gameState.enemySpawns.stream()
-                                                .flatMap(enemy -> gameState.getNeighbourCells(enemy).stream())
+                                                .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
                                                 .anyMatch(cell -> cell.coordinate.equals(updatedSpawn.coordinate))) {
                                             return 10;
                                         } else {
-                                            return cells.size() * -1;
+                                            return gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1  + isOnBorderValue;
                                         }
                                     }))
                                     .filter(moveBuildAction -> {
                                         GameState gameStateWithAction = gameState.withAction(spawn, moveBuildAction, true);
                                         Spawn updatedSpawn = gameStateWithAction.getMySpawn(spawn.index);
                                         int accessibleCells = gameStateWithAction.accessibleCells(updatedSpawn).size();
-                                        return accessibleCells > 1;
+                                        return accessibleCells > 0;
                                     });
                         })
 
@@ -357,6 +392,31 @@ class Player {
                 .collect(Collectors.toList());
         }
 
+        AbstractMap.SimpleEntry<Integer, Set<Coordinate>> overallAccessibleCells(Spawn spawn, Set<Coordinate> allAccessibleCoordinates, int turn) {
+            List<Coordinate> accessibleCoordinates = accessibleCells(spawn).stream().map(cell -> cell.coordinate).collect(Collectors.toList());
+
+            Set<Coordinate> newAllAccessibleCoordinates = new HashSet<>();
+            newAllAccessibleCoordinates.addAll(allAccessibleCoordinates);
+            newAllAccessibleCoordinates.addAll(accessibleCoordinates);
+
+            if (accessibleCoordinates.isEmpty() || turn >= 3) {
+                return new AbstractMap.SimpleEntry(turn, allAccessibleCoordinates);
+            } else {
+                return accessibleCoordinates.stream()
+                        .map(coordinate -> {
+                            return overallAccessibleCells(new Spawn(spawn.index, coordinate), newAllAccessibleCoordinates, turn + 1);
+                        })
+                        .max(Comparator.comparingInt(AbstractMap.SimpleEntry::getKey))
+                        .get();
+            }
+        }
+
+        AbstractMap.SimpleEntry<Integer, Set<Coordinate>> overallAccessibleCells(Spawn spawn) {
+            AbstractMap.SimpleEntry<Integer, Set<Coordinate>> integerListSimpleEntry = overallAccessibleCells(spawn, new HashSet<>(), 1);
+
+            return integerListSimpleEntry;
+        }
+
         List<Cell> accessibleCells(Spawn spawn) {
             List<Coordinate> spawnsCoordinate = getSpawnsCoordinate();
 
@@ -403,46 +463,6 @@ class Player {
                     .count();
         }
 
-        Long score(MoveBuildCandidate candidate) {
-            long moveToCellLevel3Bonus = candidate.moveTo.height == 3 ? 5 : 0;
-
-            long botherEnemies = enemySpawns.stream()
-                    .flatMap(spawn -> accessibleCells(spawn).stream())
-                    .filter(cell -> cell.coordinate.equals(candidate.moveTo.coordinate) || cell.coordinate.equals(candidate.build.coordinate))
-                    .count();
-
-            GameState gameWithCandidateAction = withAction(candidate.spawn, candidate.toMoveBuildAction(), true);
-            long helpedEnemies = enemySpawns.stream()
-                    .flatMap(spawn -> gameWithCandidateAction.accessibleCells(spawn).stream())
-                    .filter(cell -> cell.coordinate.equals(candidate.build.coordinate))
-                    .count();
-
-            long helpedFriends = mySpawns.stream()
-                    .flatMap(spawn -> gameWithCandidateAction.accessibleCells(spawn).stream())
-                    .filter(cell -> cell.coordinate.equals(candidate.build.coordinate))
-                    .count();
-
-            long lockEnemies = enemySpawns.stream()
-                    .filter(spawn -> gameWithCandidateAction.accessibleCells(spawn).size() == 0)
-                    .count();
-
-            long lockFriends = mySpawns.stream()
-                    .filter(spawn -> gameWithCandidateAction.accessibleCells(spawn).size() == 0)
-                    .count();
-
-            long enemySpawnAccessibleThirdLevelCells = enemySpawns.stream()
-                    .flatMap(spawn -> gameWithCandidateAction.getAccessibleThirdLevelCells(spawn).stream())
-                    .count();
-
-            long mySpawnAccessibleThirdLevelCells = mySpawns.stream()
-                    .flatMap(spawn -> gameWithCandidateAction.getAccessibleThirdLevelCells(spawn).stream())
-                    .count();
-
-            long score = botherEnemies - helpedEnemies + helpedFriends + (lockEnemies - lockFriends) * 10 +
-                    moveToCellLevel3Bonus + candidate.moveTo.height +
-                    (enemySpawnAccessibleThirdLevelCells + 1 - mySpawnAccessibleThirdLevelCells);
-            return score;
-        }
 
         GameState withAction(Spawn spawn, PushBuildCandidate pushBuildCandidate) {
             Spawn movedSpawn = new Spawn(pushBuildCandidate.targetSpawn.index, pushBuildCandidate.pushTo.coordinate);
@@ -460,8 +480,12 @@ class Player {
             return new GameState(size, mySpawns, updatedSpawnList, boardState.upgradingCellAt(cellToUpgrade.coordinate), new ArrayList<>());
         }
 
-        public Spawn getMySpawn(int index) {
+        Spawn getMySpawn(int index) {
             return mySpawns.stream().filter(spawn -> spawn.index == index).findFirst().get();
+        }
+
+        public boolean isOnBorder(Coordinate coordinate) {
+            return coordinate.row == 0 || coordinate.col == 0 || coordinate.row == size - 1 || coordinate.col == size - 1;
         }
     }
 
