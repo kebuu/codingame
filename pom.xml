@@ -13,6 +13,7 @@
         <module>pirate</module>
         <module>wondev</module>
         <module>nospoon</module>
+        <module>minimax</module>
     </modules>
 
     <dependencies>

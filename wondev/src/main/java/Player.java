@@ -78,7 +78,7 @@ class Player {
                                 .findFirst();
 
                         if(enemyPushAction.isPresent()) {
-                            return -1;
+                            return -10;
                         } else {
                             int size1 = gameState.accessibleCells(spawn).size();
                             return size1 >= 3 ? 0 : -3 + size1;
@@ -89,6 +89,7 @@ class Player {
 
             Strategy.PushStrategy pushStrategy = new Strategy.PushStrategy();
             for (Spawn mySpawn : sortedSpawn) {
+                log(">>>> PushStrategy", pushStrategy, mySpawn);
                 Optional<? extends Action> optionalAction = pushStrategy.execute(mySpawn, gameState);
 
                 if (optionalAction.isPresent()) {
@@ -102,6 +103,7 @@ class Player {
 
             for (Spawn mySpawn : sortedSpawn) {
                 for (Strategy strategy : strategies) {
+                    log(">>>> Strategy:", strategy, mySpawn);
                     if(!played) {
                         Optional<? extends Action> optionalAction = strategy.execute(mySpawn, gameState);
 
@@ -138,54 +140,6 @@ class Player {
     static abstract class Strategy {
         abstract Optional<? extends Action> execute(Spawn spawn, GameState gameState);
 
-        static class GoToThirdLevelStrategy extends Strategy {
-            Optional<? extends Action> execute(Spawn spawn, GameState gameState) {
-
-                List<Action.MoveBuildAction> moveBuildActionList = gameState.getAccessibleThirdLevelCells(spawn).stream()
-                        .flatMap(thirdLevelCell -> {
-                            return gameState.buildableCells(thirdLevelCell, spawn).stream()
-                                    .map(buildableCell -> new MoveBuildCandidate(spawn, thirdLevelCell, buildableCell));
-                        })
-                        .map(MoveBuildCandidate::toMoveBuildAction)
-                        .filter(moveBuildAction -> {
-                            GameState gameStateWithAction = gameState.withAction(spawn, moveBuildAction, true);
-                            Spawn updatedSpawn = gameStateWithAction.getMySpawn(spawn.index);
-                            List<Cell> cells = gameStateWithAction.accessibleCells(updatedSpawn);
-                            return cells.size() > 0;
-                        }).collect(Collectors.toList());
-
-                return moveBuildActionList.stream()
-                    .sorted(Comparator.comparingInt(moveBuildAction -> {
-                        GameState gameStateWithAction = gameState.withAction(spawn, moveBuildAction, true);
-                        Spawn updatedSpawn = gameStateWithAction.getMySpawn(spawn.index);
-                        Coordinate builtCellCoordinate = updatedSpawn.coordinateTo(moveBuildAction.buildDirection);
-                        Cell builtCell = gameStateWithAction.boardState.getCellAt(builtCellCoordinate);
-
-                        int isOnBorderValue = gameState.isOnBorder(updatedSpawn.coordinate) ? -1 : 1;
-
-                        if (builtCell.height == 3 && gameState.enemySpawns.stream()
-                                .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
-                                .noneMatch(cell -> cell.equals(builtCell))) {
-                            return -100 + isOnBorderValue + gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
-                        } else if (builtCell.height == 4 && gameState.enemySpawns.stream()
-                                .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
-                                .noneMatch(cell -> cell.equals(builtCell))) {
-                            int overallAccessibleCells = gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
-                            return 100 + overallAccessibleCells;
-                        } else if (gameState.getLockedEnemies() < gameStateWithAction.getLockedEnemies()) {
-                            return -1000;
-                        } else if (gameState.enemySpawns.stream()
-                                .flatMap(enemy -> gameStateWithAction.getNeighbourCells(enemy).stream())
-                                .anyMatch(cell -> cell.coordinate.equals(updatedSpawn.coordinate))) {
-                            return 10;
-                        } else {
-                            return isOnBorderValue + gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
-                        }
-                    }))
-                    .findFirst();
-            }
-        }
-
         static class PushStrategy extends Strategy {
             private final boolean isEnemyStrategy;
 
@@ -199,11 +153,10 @@ class Player {
 
             Optional<? extends Action> execute(Spawn spawn, GameState gameState) {
 
-                List<Spawn> spawns = gameState.pushableEnemies(spawn);
+                List<Spawn> pushableEnemies = gameState.pushableEnemies(spawn);
 
-                log(spawns);
-
-                return spawns.stream()
+                return pushableEnemies.stream()
+                    .filter(spawn1 -> gameState.getHeight(spawn1) >= 2 || isEnemyStrategy)
                     .flatMap(enemySpawn -> {
                         Direction targetSpawnDirection = getDirection(spawn, enemySpawn);
 
@@ -222,14 +175,17 @@ class Player {
                             Cell targetPush = gameState.boardState.getCellAt(targetPushCoordinate);
                             return new PushBuildCandidate(spawn, enemySpawn, targetPush);
                         })
-                        .filter(pushBuildCandidate -> pushBuildCandidate.pushTo.height == 0 || pushBuildCandidate.pushTo.height == 1)
+                        .filter(pushBuildCandidate -> {
+                            int pushEnemyFromHeight = gameState.getHeight(pushBuildCandidate.targetSpawn);
+                            int pushEnemyToHeight = pushBuildCandidate.pushTo.height;
+                            return pushEnemyFromHeight + 1 >= pushEnemyToHeight;
+                        })
                         .filter(pushBuildCandidate -> !gameState.getSpawnsCoordinate().contains(pushBuildCandidate.pushTo.coordinate));
                     })
                     .filter(pushBuildCandidate -> {
                         GameState gameStateWithAction = gameState.withAction(spawn, pushBuildCandidate);
                         Spawn updatedSpawn = gameStateWithAction.getMySpawn(spawn.index);
                         int accessibleCells = gameStateWithAction.accessibleCells(updatedSpawn).size();
-                        log("pushBuildCandidate", pushBuildCandidate, isEnemyStrategy ,accessibleCells);
                         return isEnemyStrategy || accessibleCells > 0;
                     })
                     .filter(pushBuildCandidate -> {
@@ -251,7 +207,7 @@ class Player {
                             return 1;
                         }
 
-                        return Integer.valueOf(pushBuildCandidate1.pushTo.height).compareTo(Integer.valueOf(pushBuildCandidate1.pushTo.height));
+                        return Integer.valueOf(pushBuildCandidate1.pushTo.height).compareTo(Integer.valueOf(pushBuildCandidate2.pushTo.height));
                     })
                     .map(PushBuildCandidate::toPushBuildAction);
             }
@@ -305,39 +261,38 @@ class Player {
 
                                         int isOnBorderValue = gameState.isOnBorder(updatedSpawn.coordinate) ? -1 : 1;
 
-                                        Strategy.PushStrategy enemyPushStrategy = new Strategy.PushStrategy(true);
+                                        boolean hasNeighourTrap = gameStateWithAction.hasNeighourTrap(movingToCell);
+                                        int hasNeighourTrapValue = hasNeighourTrap ? 10 : 0;
 
-                                        Optional<? extends Action> enemyPushAction = gameStateWithAction.enemySpawns.stream()
-                                                .filter(enemySpawn -> enemySpawn.coordinate.row != -1)
-                                                .map(enemySpawn -> enemyPushStrategy.execute(enemySpawn, gameStateWithAction))
-                                                .filter(Optional::isPresent)
-                                                .map(Optional::get)
-//                                                .filter(action -> {
-//                                                    Action.PushBuildAction pushBuildAction =(Action.PushBuildAction)action;
-//                                                    Spawn spawn2 = gameStateWithAction.enemySpawns.stream().filter(spawn1 -> spawn1.index == pushBuildAction.spawnIndex).findFirst().get();
-//                                                    return spawn.coordinate.equals(spawn2.coordinateTo(pushBuildAction.targetSpawnDirection));
-//                                                })
-                                                .findFirst();
+                                        Set<Coordinate> overallAccessibleCoordinates = gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue();
 
-                                        if(enemyPushAction.isPresent()) {
-                                            return 1000;
-                                        } else if (updatedCell.height == 3 && gameState.enemySpawns.stream()
+                                        List<Cell> accessibleCells = gameStateWithAction.accessibleCells(updatedSpawn);
+                                        int accessibleCellsValue = accessibleCells.size() * -1;
+                                        int isBuildCellAccessible = accessibleCells.contains(updatedCell) ? -1 : 1;
+
+                                        int commonVals = Math.min(10, overallAccessibleCoordinates.size()) * -1 +
+                                                hasNeighourTrapValue +
+                                                Math.min(4, accessibleCellsValue) * -1 +
+                                                isOnBorderValue +
+                                                isBuildCellAccessible ;
+
+                                        if (updatedCell.height == 3 && gameState.enemySpawns.stream()
                                                 .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
                                                 .noneMatch(cell -> cell.equals(updatedCell))) {
-                                            return -100 + isOnBorderValue + gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
+                                            return -100 + commonVals;
                                         } else if (updatedCell.height == 4 && gameState.enemySpawns.stream()
                                                 .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
                                                 .noneMatch(cell -> cell.equals(updatedCell))) {
-                                            int overallAccessibleCells = gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1;
-                                            return 100 + overallAccessibleCells;
+                                            int overallAccessibleCells = overallAccessibleCoordinates.size() * -1 + accessibleCellsValue;
+                                            return 100 + commonVals;
                                         } else if (gameState.getLockedEnemies() < gameStateWithAction.getLockedEnemies()) {
-                                            return -1000;
+                                            return -1000 + commonVals;
                                         } else if (gameState.enemySpawns.stream()
                                                 .flatMap(enemy -> gameState.accessibleCells(enemy).stream())
                                                 .anyMatch(cell -> cell.coordinate.equals(updatedSpawn.coordinate))) {
-                                            return 10;
+                                            return 10 + commonVals;
                                         } else {
-                                            return gameStateWithAction.overallAccessibleCells(updatedSpawn).getValue().size() * -1  + isOnBorderValue;
+                                            return commonVals;
                                         }
                                     }))
                                     .filter(moveBuildAction -> {
@@ -381,6 +336,11 @@ class Player {
             this.legalActions = allLegalActions;
         }
 
+        boolean hasNeighourTrap(Cell cell) {
+            return getNeighbourCells(cell).stream()
+                    .anyMatch(neighbourCell -> accessibleCells(new Spawn(-1, neighbourCell.coordinate)).isEmpty());
+        }
+
         List<Cell> getNeighbourCells(WithCoordinate withCoordinate) {
             if (withCoordinate.coordinate.equals(INVISIBLE_COORDINATE)) {
                 return new ArrayList<>();
@@ -400,9 +360,9 @@ class Player {
 
             return neighbourCoordinates.stream().filter(coordinate -> coordinate.row >= 0 && coordinate.col >= 0 &&
                     coordinate.row < size && coordinate.col < size)
-            .map(boardState::getCellAt)
-            .filter(cell -> cell.height < 4 && cell.height >= 0)
-            .collect(Collectors.toList());
+                    .map(boardState::getCellAt)
+                    .filter(cell -> cell.height < 4 && cell.height >= 0)
+                    .collect(Collectors.toList());
         }
 
         int getHeight(WithCoordinate withCoordinate) {
@@ -440,12 +400,6 @@ class Player {
                     "}\n";
         }
 
-        List<Cell> getAccessibleThirdLevelCells(Spawn spawn) {
-            return accessibleCells(spawn).stream()
-                .filter(cell -> cell.height == 3 && getHeight(spawn) >= 2)
-                .collect(Collectors.toList());
-        }
-
         AbstractMap.SimpleEntry<Integer, Set<Coordinate>> overallAccessibleCells(Spawn spawn, Set<Coordinate> allAccessibleCoordinates, int turn) {
             List<Coordinate> accessibleCoordinates = accessibleCells(spawn).stream().map(cell -> cell.coordinate).collect(Collectors.toList());
 
@@ -453,7 +407,7 @@ class Player {
             newAllAccessibleCoordinates.addAll(allAccessibleCoordinates);
             newAllAccessibleCoordinates.addAll(accessibleCoordinates);
 
-            if (accessibleCoordinates.isEmpty() || turn >= 3) {
+            if (accessibleCoordinates.isEmpty() || turn >= 3 || allAccessibleCoordinates.size() >= 8) {
                 return new AbstractMap.SimpleEntry(turn, allAccessibleCoordinates);
             } else {
                 return accessibleCoordinates.stream()
@@ -488,8 +442,7 @@ class Player {
             return getNeighbourCells(spawn).stream()
                     .flatMap(cell -> {
                         return enemies.stream()
-                                .filter(enemySpawn -> enemySpawn.coordinate.equals(cell.coordinate))
-                                .filter(enemySpawn -> getHeight(enemySpawn) >= 2);
+                                .filter(enemySpawn -> enemySpawn.coordinate.equals(cell.coordinate));
                     })
                     .collect(Collectors.toList());
         }
@@ -505,8 +458,8 @@ class Player {
 
         List<Coordinate> getSpawnsCoordinate() {
             return Stream.concat(mySpawns.stream(), enemySpawns.stream())
-                        .map(spawn -> spawn.coordinate)
-                        .collect(Collectors.toList());
+                    .map(spawn -> spawn.coordinate)
+                    .collect(Collectors.toList());
         }
 
         long getLockedEnemies() {
@@ -526,26 +479,25 @@ class Player {
 
             boolean isSpawnMySpawn = mySpawns.stream().anyMatch(mySpawn -> mySpawn.coordinate.equals(spawn.coordinate));
 
-            List<Spawn> spawnListToUpdate = isSpawnMySpawn ? mySpawns : enemySpawns;
+            List<Spawn> spawnListToUpdate = isSpawnMySpawn ? enemySpawns : mySpawns;
 
             Spawn movedSpawn = new Spawn(pushBuildCandidate.targetSpawn.index, pushBuildCandidate.pushTo.coordinate);
             Cell cellToUpgrade = boardState.getCellAt(pushBuildCandidate.targetSpawn.coordinate);
 
             List<Spawn> updatedSpawnList = new ArrayList<>();
-            for (Spawn enemySpawn : spawnListToUpdate) {
-                if (enemySpawn.index == movedSpawn.index) {
+            for (Spawn spawnOfListToUpdate : spawnListToUpdate) {
+                if (spawnOfListToUpdate.index == movedSpawn.index) {
                     updatedSpawnList.add(movedSpawn);
                 } else {
-                    updatedSpawnList.add(enemySpawn);
+                    updatedSpawnList.add(spawnOfListToUpdate);
                 }
             }
 
             if (isSpawnMySpawn) {
-                return new GameState(size, updatedSpawnList, enemySpawns, boardState.upgradingCellAt(cellToUpgrade.coordinate), new ArrayList<>());
-            } else {
                 return new GameState(size, mySpawns, updatedSpawnList, boardState.upgradingCellAt(cellToUpgrade.coordinate), new ArrayList<>());
+            } else {
+                return new GameState(size, updatedSpawnList, enemySpawns, boardState.upgradingCellAt(cellToUpgrade.coordinate), new ArrayList<>());
             }
-
         }
 
         Spawn getMySpawn(int index) {
@@ -570,8 +522,8 @@ class Player {
 
         public String toString() {
             return cells.stream()
-                .map(this::toStringRow)
-                .collect(Collectors.joining("\n"));
+                    .map(this::toStringRow)
+                    .collect(Collectors.joining("\n"));
         }
 
         String toStringRow(List<Cell> rowCells) {
@@ -860,72 +812,39 @@ class Player {
 
     enum Direction {
         N {
-            Direction opposite() {
-                return S;
-            }
-
             List<Direction> siblings() {
                 return Arrays.asList(NE, NW);
             }
         },S {
-            Direction opposite() {
-                return N;
-            }
-
             List<Direction> siblings() {
                 return Arrays.asList(SE, SW);
             }
         },E {
-            Direction opposite() {
-                return W;
-            }
-
             List<Direction> siblings() {
                 return Arrays.asList(SE, NE);
             }
         },W {
-            Direction opposite() {
-                return E;
-            }
-
             List<Direction> siblings() {
                 return Arrays.asList(NW, SW);
             }
         },SE {
-            Direction opposite() {
-                return NW;
-            }
-
             List<Direction> siblings() {
                 return Arrays.asList(E, S);
             }
         },SW {
-            Direction opposite() {
-                return NE;
-            }
-
             List<Direction> siblings() {
                 return Arrays.asList(S, W);
             }
         },NE {
-            Direction opposite() {
-                return SW;
-            }
-
             List<Direction> siblings() {
                 return Arrays.asList(E, N);
             }
         },NW {
-            Direction opposite() {
-                return SE;
-            }
-
             List<Direction> siblings() {
                 return Arrays.asList(N, W);
             }
         };
 
-        abstract Direction opposite();
         abstract List<Direction> siblings();
     }
 
@@ -969,6 +888,15 @@ class Player {
             Direction targetSpawnDirection = getDirection(spawn, targetSpawn);
             Direction pushToDirection = getDirection(targetSpawn, pushTo);
             return new Action.PushBuildAction(spawn, targetSpawnDirection, pushToDirection);
+        }
+
+        @Override
+        public String toString() {
+            return "PushBuildCandidate{" +
+                    "spawn=" + spawn +
+                    ", targetSpawn=" + targetSpawn +
+                    ", pushTo=" + pushTo +
+                    '}';
         }
     }
 }
