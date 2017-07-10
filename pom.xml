@@ -13,7 +13,9 @@
         <module>pirate</module>
         <module>wondev</module>
         <module>nospoon</module>
-        <module>minimax</module>
+        <module>minmax</module>
+        <module>skynet</module>
+        <module>skynet2</module>
     </modules>
 
     <dependencies>

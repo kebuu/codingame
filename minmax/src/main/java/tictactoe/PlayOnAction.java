@@ -1,14 +1,14 @@
 package tictactoe;
 
 import minmax.Player;
-import tictactoe.player.XYTicTacToePlayer;
+import tictactoe.player.TicTacToePlayer;
 
 class PlayOnAction implements Player.Action {
 
-    final TicTacToeGame.Coordinate coordinate;
-    final XYTicTacToePlayer ticTacToePlayer;
+    final Coordinate coordinate;
+    final TicTacToePlayer ticTacToePlayer;
 
-    PlayOnAction(TicTacToeGame.Coordinate coordinate, XYTicTacToePlayer ticTacToePlayer) {
+    PlayOnAction(Coordinate coordinate, TicTacToePlayer ticTacToePlayer) {
         this.coordinate = coordinate;
         this.ticTacToePlayer = ticTacToePlayer;
     }
