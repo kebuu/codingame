@@ -12,7 +12,7 @@ public class MinMaxTicTacToePlayer extends BaseTicTacToePlayer {
     public MinMaxTicTacToePlayer(TicTacToePlayerType type, int maxDepth) {
         super(type);
 
-        this.config = new Player.MinMaxConfig<TicTacToeGameState>(maxDepth) {
+        this.config = new Player.MinMaxConfig<TicTacToeGameState>(maxDepth, this) {
             public int score(TicTacToeGameState gameState) {
                 Optional<TicTacToePlayer> optionalWinner = gameState.getWinner();
 

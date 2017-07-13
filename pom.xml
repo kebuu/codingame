@@ -16,6 +16,7 @@
         <module>minmax</module>
         <module>skynet</module>
         <module>skynet2</module>
+        <module>descent</module>
     </modules>
 
     <dependencies>

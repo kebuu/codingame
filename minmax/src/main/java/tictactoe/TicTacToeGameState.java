@@ -31,6 +31,10 @@ public class TicTacToeGameState implements Player.GameState {
                 row.add(null);
             }
         }
+
+        board.get(0).set(0, player1);
+        board.get(0).set(1, player2);
+        board.get(2).set(1, player2);
     }
 
     @Override

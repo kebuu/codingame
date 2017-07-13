@@ -10,8 +10,8 @@ public class TicTacToeGame {
     public static void main(String[] args) {
         TicTacToeGame ticTacToeGame = new TicTacToeGame();
 
-        TicTacToePlayer oPlayer = new RandomTicTacToePlayer(TicTacToePlayerType.X);
-        TicTacToePlayer xPlayer = new MinMaxTicTacToePlayer(TicTacToePlayerType.O, 3);
+        TicTacToePlayer xPlayer = new RandomTicTacToePlayer(TicTacToePlayerType.X);
+        TicTacToePlayer oPlayer = new MinMaxTicTacToePlayer(TicTacToePlayerType.O, 3);
         //TicTacToePlayer xPlayer = new FirstPossibleActionPlayer();
         Optional<TicTacToePlayer> winner = ticTacToeGame.play(oPlayer, xPlayer);
         System.err.println(winner);
@@ -24,9 +24,11 @@ public class TicTacToeGame {
         TicTacToePlayer nextPlayer = player1;
         Optional<TicTacToePlayer> optionalWinner = gameState.getWinner();
 
+        int turn = 1;
         while (!isEndOfGame(gameState) && !optionalWinner.isPresent()) {
+            long currentTimeMillis = System.currentTimeMillis();
             Optional<Player.Action> optionalAction = nextPlayer.play(gameState);
-
+            System.err.println("Time to play (" + nextPlayer + ") : " + (System.currentTimeMillis() - currentTimeMillis));
             if (optionalAction.isPresent()) {
                 gameState = optionalAction.get().accept(gameState);
             }
@@ -34,8 +36,9 @@ public class TicTacToeGame {
             optionalWinner = gameState.getWinner();
             nextPlayer = nextPlayer == player1 ? player2 : player1;
 
-            System.err.println("Game state end of turn : ");
+            System.err.println("Game state end of turn " + turn + " : ");
             System.err.println(gameState);
+            turn++;
         }
 
         return optionalWinner;

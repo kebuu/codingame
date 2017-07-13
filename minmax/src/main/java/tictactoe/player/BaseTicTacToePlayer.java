@@ -1,6 +1,6 @@
 package tictactoe.player;
 
-public abstract class BaseTicTacToePlayer implements TicTacToePlayer{
+public abstract class BaseTicTacToePlayer implements TicTacToePlayer {
 
     private final TicTacToePlayerType type;
 

@@ -13,6 +13,7 @@ public class RandomTicTacToePlayer extends BaseTicTacToePlayer {
 
     public RandomTicTacToePlayer(TicTacToePlayerType type) {
         super(type);
+        random.setSeed(2000);
     }
 
     public Optional<Player.Action> play(TicTacToeGameState gameState) {

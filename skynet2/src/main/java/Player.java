@@ -1,7 +1,5 @@
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Scanner;
+import java.util.*;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -17,11 +15,8 @@ class Player {
 
         Scanner in = new Scanner(System.in);
         int N = in.nextInt(); // nombre total de noeud dans le niveau, y compris les passerelles
-        System.err.println("Nombre de noeuds: " + N);
         int L = in.nextInt(); // le nombre de lien
-        System.err.println("Nombre de liens: " + L);
         int E = in.nextInt(); // le nombre de passerelle
-        System.err.println("Nombre de passerelles: " + E);
 
         for (int i = 0; i < L; i++) {
             int N1 = in.nextInt(); // N1 and N2 defines a link between these nodes
@@ -29,12 +24,10 @@ class Player {
 
             Lien lien = new Lien(N1, N2);
             jeu.liens.add(lien);
-            System.err.println("Nouveau lien : " + lien);
         }
 
         for (int i = 0; i < E; i++) {
             int EI = in.nextInt(); // the index of a gateway node
-            System.err.println("Passerelle : " + EI);
             jeu.passerelles.add(new Noeud(EI));
         }
 
@@ -70,18 +63,14 @@ class Player {
                             .filter(lien -> passerelles.stream().anyMatch(lien::contient))
                             .sorted(Comparator.comparingInt((Lien lien) -> {
                                 Noeud noeudNonPasserelleDuLien = Stream.of(lien.noeud_1, lien.noeud_2).filter(noeud -> !passerelles.contains(noeud)).findFirst().get();
+                                return distance(noeudVirus, noeudNonPasserelleDuLien);
+                            }).thenComparing((Lien lien) -> {
+                                Noeud noeudNonPasserelleDuLien = Stream.of(lien.noeud_1, lien.noeud_2).filter(noeud -> !passerelles.contains(noeud)).findFirst().get();
                                 return (int) liens.stream()
-                                    .filter(lien1 -> lien1.ouvert)
-                                    .filter(lien1 -> lien1.contient(noeudNonPasserelleDuLien) &&
-                                            (passerelles.contains(lien1.noeud_1) || passerelles.contains(lien1.noeud_2)))
-                                    .count();
-                            }).reversed().thenComparing((Lien lien) -> {
-                                boolean virusProche = Stream.of(lien.noeud_1, lien.noeud_2)
-                                        .filter(noeud -> !passerelles.contains(noeud))
-                                        .anyMatch(noeud -> liens.stream()
-                                                .filter(liens1 -> liens1.ouvert)
-                                                .anyMatch(lien1 -> lien1.contient(noeud) && lien1.contient(noeudVirus)));
-                                return virusProche ? -1 : 0;
+                                        .filter(lien1 -> lien1.ouvert)
+                                        .filter(lien1 -> lien1.contient(noeudNonPasserelleDuLien) &&
+                                                (passerelles.contains(lien1.noeud_1) || passerelles.contains(lien1.noeud_2)))
+                                        .count() * -1;
                             }))
                             .findFirst()
                             .get()
@@ -89,6 +78,77 @@ class Player {
 
             return lienACouper;
         }
+
+        int distance(Noeud source, Noeud cible) {
+            List<AStarNode> openNodes = new ArrayList<>();
+            List<AStarNode> closeNodes = new ArrayList<>();
+
+            openNodes.add(new AStarNode(source));
+
+            int distance = -1;
+
+            while (!openNodes.isEmpty()) {
+                AStarNode bestStep = openNodes.stream().min(Comparator.comparingInt(AStarNode::getF)).get();
+
+                openNodes.remove(bestStep);
+
+                List<AStarNode> successors = liens.stream()
+                        .filter(lien -> lien.contient(bestStep.noeud))
+                        .map(lien -> lien.noeud_1.equals(bestStep.noeud) ? lien.noeud_2: lien.noeud_1)
+                        .filter(noeud -> !passerelles.contains(noeud))
+                        .map(noeud -> {
+                            AStarNode aStarNode = new AStarNode(noeud);
+                            aStarNode.parent = bestStep;
+                            return aStarNode;
+                        })
+                        .collect(Collectors.toList());
+
+                for (AStarNode successor : successors) {
+                    boolean passerelleAccessible = liens.stream()
+                            .anyMatch(lien -> lien.ouvert && lien.contient(successor.noeud) && (passerelles.contains(lien.noeud_1) || passerelles.contains(lien.noeud_2)));
+
+                    int stepCost = passerelleAccessible ? 0 : 1;
+                    successor.f = bestStep.getF() + stepCost;
+
+                    if (successor.noeud.equals(cible)) {
+                        return successor.f;
+                    }
+
+                    boolean b = openNodes.stream().anyMatch(aStarNode -> aStarNode.noeud.equals(successor.getNoeud()) && aStarNode.f <= successor.f);
+                    boolean c = closeNodes.stream().anyMatch(aStarNode -> aStarNode.noeud.equals(successor.getNoeud()) && aStarNode.f <= successor.f);
+
+                    if (!b && !c) {
+                        openNodes.add(successor);
+                    }
+                }
+
+                closeNodes.add(bestStep);
+            }
+
+
+//            while the open list is not empty
+    //            find the node with the least f on the open list, call it "q"
+    //            pop q off the open list
+    //            generate q's 8 successors and set their parents to q
+    //            for each successor
+        //            if successor is the goal, stop the search
+        //            successor.g = q.g + distance between successor and q
+        //            successor.h = distance from goal to successor
+        //            successor.f = successor.g + successor.h
+        //
+        //            if a node with the same position as successor is in the OPEN list \
+        //              which has a lower f than successor, skip this successor
+        //            if a node with the same position as successor is in the CLOSED list \
+        //              which has a lower f than successor, skip this successor
+        //            otherwise, add the node to the open list
+    //            end
+    //            push q on the closed list
+//            end
+
+            System.err.println("source:" + source + ",cible:" + cible + ",distance:" + distance);
+            return distance;
+        }
+
     }
 
     static class Lien {
@@ -160,6 +220,43 @@ class Player {
         @Override
         public String toString() {
             return "Node " + index;
+        }
+    }
+
+    static class AStarNode {
+        AStarNode parent;
+        final Noeud noeud;
+        int f;
+        int g;
+        int h;
+
+        AStarNode(Noeud noeud) {
+            this.noeud = noeud;
+        }
+
+        public AStarNode getParent() {
+            return parent;
+        }
+
+        public Noeud getNoeud() {
+            return noeud;
+        }
+
+        public int getF() {
+            return f;
+        }
+
+        public int getG() {
+            return g;
+        }
+
+        public int getH() {
+            return h;
+        }
+
+        @Override
+        public String toString() {
+            return parent.noeud + "->" + noeud + "-" + f;
         }
     }
 }

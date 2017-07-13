@@ -5,7 +5,7 @@ import tictactoe.TicTacToeGameState;
 
 import java.util.Optional;
 
-public interface TicTacToePlayer {
+public interface TicTacToePlayer extends Player.GamePlayer {
 
     Optional<Player.Action> play(TicTacToeGameState gameState);
 

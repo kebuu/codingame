@@ -1,12 +1,12 @@
 package minmax;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class Player {
 
+    private static final boolean MIN_MAX_LOG = true;
+    
     public static void main(String[] args) {
         GameState gameState = null;
         MinMaxConfig<GameState> minMaxConfig = null;
@@ -20,6 +20,14 @@ public class Player {
         String asString();
         GameState fromString(String stateAsString);
         List<Action> possibleActions();
+
+        default Optional<? extends GamePlayer> getWinner() {
+            return Optional.empty();
+        }
+    }
+
+    public interface GamePlayer {
+
     }
 
     public interface Action {
@@ -29,11 +37,13 @@ public class Player {
 
     public static abstract class MinMaxConfig<T extends GameState> {
         private final int maxDepth;
+        private final GamePlayer maxPlayer;
 
         public abstract int score(T gameState);
 
-        public MinMaxConfig(int maxDepth) {
+        public MinMaxConfig(int maxDepth, GamePlayer maxPlayer) {
             this.maxDepth = maxDepth;
+            this.maxPlayer = maxPlayer;
         }
 
         int maxDepth() {
@@ -63,9 +73,16 @@ public class Player {
             this.config = config;
 
             if (depth < config.maxDepth()) {
-                List<Action> possibleActions = gameState.possibleActions();
-                for (Action possibleAction : possibleActions) {
-                    children.add(new MinMaxNode<>(possibleAction.accept(gameState), config, minMaxNodeType.switchGamer(), possibleAction, depth + 1));
+                Optional<? extends GamePlayer> winner = gameState.getWinner();
+
+                if (winner.isPresent()) {
+                    mmlog("Winner found, stopping search on this branch at depth" + depth + ". Winner: " + winner.get());
+                    mmlog(gameState);
+                } else {
+                    List<Action> possibleActions = gameState.possibleActions();
+                    for (Action possibleAction : possibleActions) {
+                        children.add(new MinMaxNode<>(possibleAction.accept(gameState), config, minMaxNodeType.switchGamer(), possibleAction, depth + 1));
+                    }
                 }
             }
         }
@@ -94,16 +111,25 @@ public class Player {
 
         int score() {
             if (nodeScore == null) {
-                if (isLeaf()) {
+
+                Optional<? extends GamePlayer> winner = gameState.getWinner();
+
+                if (winner.isPresent()) {
+                    mmlog("Winner found at depth " + depth + ". Winner: " + winner.get());
+                    mmlog(gameState);
+                    nodeScore = winner.get() == config.maxPlayer ? Integer.MAX_VALUE : Integer.MIN_VALUE;
+                } else if (isLeaf()) {
                     nodeScore = config.score(gameState);
-                    System.err.println("Scoring leaf at depth " + depth + " : " + nodeScore);
-                    System.err.println(gameState);
+                    mmlog("Scoring leaf at depth " + depth + " : " + nodeScore);
+                    mmlog(gameState);
                 } else {
-                    System.err.println("\nScoring node at depth " + depth + " (" + minMaxNodeType + ")");
+                    mmlog("\nScoring node at depth " + depth + " (" + minMaxNodeType + ")");
+                    mmlog(gameState);
                     Integer score = null;
 
                     List<Integer> childrenScores = new ArrayList<>();
                     for (MinMaxNode child : children) {
+                        mmlog(childrenScores);
                         child.addSiblingScores(childrenScores);
 
                         int childScore = child.score();
@@ -116,11 +142,12 @@ public class Player {
                         }
 
                         if (minMaxNodeType.shouldStopScoring(score, this)) {
-                            System.err.println("Pruning branch : " + score + " siblings=" + siblingsMaxScore + "," + siblingsMinScore + "," + minMaxNodeType);
+                            mmlog("Pruning branch : " + score + " siblings=" + siblingsMaxScore + "," + siblingsMinScore + "," + minMaxNodeType);
                             break;
                         }
                     }
 
+                    mmlog("\nScoring node at depth " + depth + " (" + minMaxNodeType + ") > " + score);
                     nodeScore = score;
                 }
             }
@@ -174,5 +201,11 @@ public class Player {
         abstract MinMaxNodeType switchGamer();
 
         abstract boolean shouldStopScoring(int newChildScore, MinMaxNode<?> minMaxNode);
+    }
+
+    private static void mmlog(Object... logs) {
+        if(MIN_MAX_LOG) {
+            System.err.println(Arrays.asList(logs).stream().map(Objects::toString).collect(Collectors.joining(", ")));
+        }
     }
 }
