@@ -18,8 +18,6 @@ public class Player {
     }
 
     public interface GameState {
-        String asString();
-        GameState fromString(String stateAsString);
         List<Action> possibleActions();
 
         default Optional<? extends GamePlayer> getWinner() {

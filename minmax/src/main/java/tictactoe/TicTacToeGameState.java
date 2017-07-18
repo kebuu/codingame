@@ -34,16 +34,6 @@ public class TicTacToeGameState implements Player.GameState {
     }
 
     @Override
-    public String asString() {
-        return "No tostring yet";
-    }
-
-    @Override
-    public Player.GameState fromString(String stateAsString) {
-        return null;
-    }
-
-    @Override
     public List<Player.Action> possibleActions() {
         List<Player.Action> actions = new ArrayList<>();
 
