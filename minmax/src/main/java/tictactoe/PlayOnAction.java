@@ -3,14 +3,18 @@ package tictactoe;
 import minmax.Player;
 import tictactoe.player.TicTacToePlayer;
 
-class PlayOnAction implements Player.Action {
+public class PlayOnAction implements Player.Action {
 
     final Coordinate coordinate;
     final TicTacToePlayer ticTacToePlayer;
 
-    PlayOnAction(Coordinate coordinate, TicTacToePlayer ticTacToePlayer) {
+    public PlayOnAction(Coordinate coordinate, TicTacToePlayer ticTacToePlayer) {
         this.coordinate = coordinate;
         this.ticTacToePlayer = ticTacToePlayer;
+    }
+
+    public PlayOnAction(int x, int y, TicTacToePlayer ticTacToePlayer) {
+        this(new Coordinate(x, y), ticTacToePlayer);
     }
 
     @Override
@@ -23,5 +27,13 @@ class PlayOnAction implements Player.Action {
         TicTacToeGameState ticTacToeGameState = (TicTacToeGameState) gameState;
 
         return ticTacToeGameState.withAction(this);
+    }
+
+    public Coordinate getCoordinate() {
+        return coordinate;
+    }
+
+    public TicTacToePlayer getTicTacToePlayer() {
+        return ticTacToePlayer;
     }
 }

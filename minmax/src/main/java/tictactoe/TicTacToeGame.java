@@ -11,7 +11,7 @@ public class TicTacToeGame {
         TicTacToeGame ticTacToeGame = new TicTacToeGame();
 
         TicTacToePlayer xPlayer = new RandomTicTacToePlayer(TicTacToePlayerType.X);
-        TicTacToePlayer oPlayer = new MinMaxTicTacToePlayer(TicTacToePlayerType.O, 3);
+        TicTacToePlayer oPlayer = new MinMaxTicTacToePlayer(TicTacToePlayerType.O, 2);
         //TicTacToePlayer xPlayer = new FirstPossibleActionPlayer();
         Optional<TicTacToePlayer> winner = ticTacToeGame.play(oPlayer, xPlayer);
         System.err.println(winner);

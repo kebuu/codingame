@@ -16,8 +16,8 @@ public class TicTacToeGameState implements Player.GameState {
     protected final TicTacToePlayer player2;
     protected TicTacToePlayer currentTurnPlayer;
 
-    public TicTacToeGameState(TicTacToePlayer player1, TicTacToePlayer player2) {
-        assert player1.getType() != player1.getType();
+    public  TicTacToeGameState(TicTacToePlayer player1, TicTacToePlayer player2) {
+        assert player1.getType() != player2.getType();
 
         this.currentTurnPlayer = player1;
         this.player1 = player1;
@@ -31,10 +31,6 @@ public class TicTacToeGameState implements Player.GameState {
                 row.add(null);
             }
         }
-
-        board.get(0).set(0, player1);
-        board.get(0).set(1, player2);
-        board.get(2).set(1, player2);
     }
 
     @Override
@@ -75,17 +71,20 @@ public class TicTacToeGameState implements Player.GameState {
         return stringBuilder.toString().trim();
     }
 
-    public TicTacToePlayer getCellOwner(Coordinate coordinate) {
-        assert coordinate.x >= 0 && coordinate.y >= 0 && coordinate.x < 3 && coordinate.y < 3;
+    public TicTacToePlayer getCellOwner(int x, int y) {
+        assert x >= 0 && y >= 0 && x < 3 && y < 3;
 
-        return board.get(coordinate.x).get(coordinate.y);
+        return board.get(x).get(y);
+    }
+
+    public TicTacToePlayer getCellOwner(Coordinate coordinate) {
+        return getCellOwner(coordinate.x, coordinate.y);
     }
 
     public Player.GameState withAction(PlayOnAction playOnAction) {
         TicTacToeGameState ticTacToeGameState = new TicTacToeGameState(player1, player2);
 
         for(int i = 0; i < 3; i++) {
-            List<TicTacToePlayer> row = board.get(i);
             for(int j = 0; j < 3; j++) {
                 List<TicTacToePlayer> cellOwners = ticTacToeGameState.board.get(i);
                 if (playOnAction.coordinate.x == i && playOnAction.coordinate.y == j) {
@@ -135,5 +134,66 @@ public class TicTacToeGameState implements Player.GameState {
 
     protected static Coordinate xy(int x, int y) {
         return new Coordinate(x, y);
+    }
+
+    public static class TicTacToeGameStateBuilder {
+        TicTacToePlayer player1;
+        TicTacToePlayer player2;
+        List<Coordinate> player1Coordinates = new ArrayList<>();
+        List<Coordinate> player2Coordinates = new ArrayList<>();
+
+        public TicTacToeGameStateBuilder withPlayer1(TicTacToePlayer player1, List<Coordinate> player1Coordinates) {
+            this.player1 = player1;
+            this.player1Coordinates.clear();
+            this.player1Coordinates.addAll(player1Coordinates);
+            return this;
+        }
+
+        public TicTacToeGameStateBuilder withPlayer2(TicTacToePlayer player2, List<Coordinate> player2Coordinates) {
+            this.player2 = player2;
+            this.player2Coordinates.clear();
+            this.player2Coordinates.addAll(player2Coordinates);
+            return this;
+        }
+
+        public TicTacToeGameStateBuilder withPlayer1(TicTacToePlayer player1) {
+            withPlayer1(player1, new ArrayList<>());
+            return this;
+        }
+
+        public TicTacToeGameStateBuilder withPlayer2(TicTacToePlayer player2) {
+            withPlayer2(player2, new ArrayList<>());
+            return this;
+        }
+
+        public TicTacToeGameState build() {
+            assert player1 != null;
+            assert player2 != null;
+            assert player1.getType() !=  player2.getType();
+            assert player1Coordinates.size() == player2Coordinates.size() || player1Coordinates.size() == player2Coordinates.size() + 1;
+            assert player1Coordinates.stream().noneMatch(coordinate -> player2Coordinates.contains(coordinate));
+
+            TicTacToeGameState gameState = new TicTacToeGameState(player1, player2);
+
+            for(int i = 0; i < 3; i++) {
+                List<TicTacToePlayer> row = gameState.board.get(i);
+                for(int j = 0; j < 3; j++) {
+                    Coordinate coordinate = new Coordinate(i, j);
+                    if (player1Coordinates.contains(coordinate)) {
+                        row.set(j, player1);
+                    } else if (player2Coordinates.contains(coordinate)) {
+                        row.set(j, player2);
+                    }
+                }
+            }
+
+            if (player1Coordinates.size() == player2Coordinates.size()) {
+                gameState.currentTurnPlayer = player1;
+            } else {
+                gameState.currentTurnPlayer = player2;
+            }
+
+            return gameState;
+        }
     }
 }
