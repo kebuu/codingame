@@ -74,21 +74,6 @@ public class Player {
             this.minMaxStat = minMaxStat;
 
             minMaxStat.incNbOfNodes();
-
-            if (depth < config.maxDepth()) {
-                Optional<? extends GamePlayer> winner = gameState.getWinner();
-
-                if (winner.isPresent()) {
-                    minMaxStat.incNbOfTerminalNodes();
-                    mmlog(() -> "Winner found, stopping search on this branch at depth " + depth + ". Winner: " + winner.get());
-                    mmlog(() -> gameState);
-                } else {
-                    List<Action> possibleActions = gameState.possibleActions();
-                    for (Action possibleAction : possibleActions) {
-                        children.add(new MinMaxNode<>(possibleAction.accept(gameState), config, minMaxNodeType.switchGamer(), possibleAction, depth + 1, minMaxStat));
-                    }
-                }
-            }
         }
 
         MinMaxNode(T gameState, MinMaxConfig<T> config, MinMaxNodeType minMaxNodeType, int depth, MinMaxStat minMaxStat) {
@@ -110,7 +95,7 @@ public class Player {
         }
 
         boolean isLeaf() {
-            return children.isEmpty();
+            return depth == config.maxDepth;
         }
 
         int score() {
@@ -129,17 +114,20 @@ public class Player {
                     mmlog(() -> "Scoring leaf at depth " + depth + " : " + nodeScore);
                     mmlog(() -> gameState);
                 } else {
-                    mmlog(() -> "\nScoring node at depth " + depth + " (" + minMaxNodeType + ")");
+                    mmlog(() -> "Scoring node at depth " + depth + " (" + minMaxNodeType + ")");
                     mmlog(() -> gameState);
                     Integer score = null;
 
                     List<Integer> childrenScores = new ArrayList<>();
-                    for (int childIndex = 0; childIndex < children.size(); childIndex++) {
-                        MinMaxNode child = children.get(childIndex);
-                        mmlog(() -> childrenScores);
-                        child.addSiblingScores(childrenScores);
+                    List<Action> possibleActions = gameState.possibleActions();
+                    for (Action possibleAction : possibleActions) {
+                        MinMaxNode childNode = new MinMaxNode<>(possibleAction.accept(gameState), config, minMaxNodeType.switchGamer(), possibleAction, depth + 1, minMaxStat);
+                        children.add(childNode);
 
-                        int childScore = child.score();
+                        mmlog(() -> childrenScores);
+                        childNode.addSiblingScores(childrenScores);
+
+                        int childScore = childNode.score();
                         childrenScores.add(childScore);
 
                         if (score == null) {
@@ -149,14 +137,13 @@ public class Player {
                         }
 
                         if (minMaxNodeType.shouldStopScoring(score, this)) {
-                            int evaluatedChildren = childIndex + 1;
-                            mmlog(() -> "Pruning branch after evaluated " + evaluatedChildren + " child(ren) : " + childScore + " siblings=" + siblingsMaxScore + "," + siblingsMinScore + "," + minMaxNodeType);
+                            mmlog(() -> "Pruning branch at depth  " + depth + " : " + childScore + " siblings=" + siblingsMaxScore + "," + siblingsMinScore + "," + minMaxNodeType);
                             break;
                         }
                     }
 
                     nodeScore = score;
-                    mmlog(() -> "\nScoring node at depth " + depth + " (" + minMaxNodeType + ") > " + nodeScore);
+                    mmlog(() -> "Scoring node at depth " + depth + " (" + minMaxNodeType + ") > " + nodeScore);
                 }
             }
 
@@ -174,6 +161,8 @@ public class Player {
         @SuppressWarnings("unchecked")
         public Optional<Action> bestAction() {
             long timeBeforeScoring = System.currentTimeMillis();
+
+            int score = score();
 
             Optional<Action> optionalAction = children.stream()
                     .max(Comparator.comparingInt(MinMaxNode::score))

@@ -15,6 +15,7 @@ public class TicTacToeGameState implements Player.GameState {
     protected final TicTacToePlayer player1;
     protected final TicTacToePlayer player2;
     protected TicTacToePlayer currentTurnPlayer;
+    private Optional<TicTacToePlayer> optionalWinner;
 
     public  TicTacToeGameState(TicTacToePlayer player1, TicTacToePlayer player2) {
         assert player1.getType() != player2.getType();
@@ -90,17 +91,21 @@ public class TicTacToeGameState implements Player.GameState {
     }
 
     public Optional<TicTacToePlayer> getWinner() {
-        return winningSituations().stream()
-                .map(coordinates -> coordinates.stream()
-                        .map(this::getCellOwner)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.groupingBy(Function.identity())))
-                .filter(xyTicTacToePlayerListMap ->  {
-                    return xyTicTacToePlayerListMap.entrySet().stream()
-                            .anyMatch(xyTicTacToePlayerListEntry -> xyTicTacToePlayerListEntry.getValue().size() == 3);
-                })
-                .flatMap(xyTicTacToePlayerListMap -> xyTicTacToePlayerListMap.keySet().stream())
-                .findFirst();
+        if (optionalWinner == null) {
+            optionalWinner = winningSituations().stream()
+                    .map(coordinates -> coordinates.stream()
+                            .map(this::getCellOwner)
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.groupingBy(Function.identity())))
+                    .filter(xyTicTacToePlayerListMap ->  {
+                        return xyTicTacToePlayerListMap.entrySet().stream()
+                                .anyMatch(xyTicTacToePlayerListEntry -> xyTicTacToePlayerListEntry.getValue().size() == 3);
+                    })
+                    .flatMap(xyTicTacToePlayerListMap -> xyTicTacToePlayerListMap.keySet().stream())
+                    .findFirst();
+        }
+
+        return optionalWinner;
     }
 
     private List<List<Coordinate>> winningSituations() {
