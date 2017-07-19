@@ -100,9 +100,6 @@ public class Player {
 
         int score() {
             if (nodeScore == null) {
-
-                Optional<? extends GamePlayer> winner = gameState.getWinner();
-
                 if (depth == config.maxDepth) {
                     long nanoTimeBeforeScoring = System.nanoTime();
                     nodeScore = config.score(gameState);
@@ -110,7 +107,8 @@ public class Player {
                     depthOfScoringBestNextAction = depth;
                     mmlog(() -> "Scoring leaf at depth " + depth + " : " + nodeScore);
                     mmlog(() -> gameState);
-                } else if (winner.isPresent()) {
+                } else if (gameState.getWinner().isPresent()) {
+                    Optional<? extends GamePlayer> winner = gameState.getWinner();
                     mmlog(() -> "Winner found at depth " + depth + ". Winner: " + winner.get());
                     mmlog(() -> gameState);
                     nodeScore = winner.get() == config.maxPlayer ? Integer.MAX_VALUE : Integer.MIN_VALUE;
