@@ -98,29 +98,25 @@ public class Player {
             }
         }
 
-        boolean isLeaf() {
-            return depth == config.maxDepth;
-        }
-
         int score() {
             if (nodeScore == null) {
 
                 Optional<? extends GamePlayer> winner = gameState.getWinner();
 
-                if (winner.isPresent()) {
-                    mmlog(() -> "Winner found at depth " + depth + ". Winner: " + winner.get());
-                    mmlog(() -> gameState);
-                    nodeScore = winner.get() == config.maxPlayer ? Integer.MAX_VALUE : Integer.MIN_VALUE;
-                    depthOfScoringBestNextAction = depth;
-                    minMaxStat.incNbOfTerminalNodes();
-                } else if (isLeaf()) {
+                if (depth == config.maxDepth) {
                     long nanoTimeBeforeScoring = System.nanoTime();
                     nodeScore = config.score(gameState);
                     minMaxStat.addScoringTimeNano(System.nanoTime() - nanoTimeBeforeScoring);
                     depthOfScoringBestNextAction = depth;
                     mmlog(() -> "Scoring leaf at depth " + depth + " : " + nodeScore);
                     mmlog(() -> gameState);
-                } else {
+                } else if (winner.isPresent()) {
+                    mmlog(() -> "Winner found at depth " + depth + ". Winner: " + winner.get());
+                    mmlog(() -> gameState);
+                    nodeScore = winner.get() == config.maxPlayer ? Integer.MAX_VALUE : Integer.MIN_VALUE;
+                    depthOfScoringBestNextAction = depth;
+                    minMaxStat.incNbOfTerminalNodes();
+                } else  {
                     mmlog(() -> "Scoring node at depth " + depth + " (" + minMaxNodeType + ")");
                     mmlog(() -> gameState);
                     Integer score = null;
