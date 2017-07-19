@@ -1,3 +1,3 @@
-Ne pas recalculer plusieurs fois les actions possibles pour un tour
 Réutiliser l'arbre d'un tour sur l'autre
-Ne pas créer les noeuds que l'on va élaguer
+Approfondir l'arbre si le temps le permet
+Ne pas recalculer plusieurs fois les actions possibles pour un tour

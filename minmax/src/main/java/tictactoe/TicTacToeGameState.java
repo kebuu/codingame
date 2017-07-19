@@ -17,7 +17,7 @@ public class TicTacToeGameState implements Player.GameState {
     protected TicTacToePlayer currentTurnPlayer;
     private Optional<TicTacToePlayer> optionalWinner;
 
-    public  TicTacToeGameState(TicTacToePlayer player1, TicTacToePlayer player2) {
+    public TicTacToeGameState(TicTacToePlayer player1, TicTacToePlayer player2) {
         assert player1.getType() != player2.getType();
 
         this.currentTurnPlayer = player1;
