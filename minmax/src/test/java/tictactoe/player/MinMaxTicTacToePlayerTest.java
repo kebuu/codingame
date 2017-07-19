@@ -76,6 +76,38 @@ public class MinMaxTicTacToePlayerTest {
       Assertions.assertThat(((PlayOnAction)actionOptional.get()).getCoordinate()).isEqualTo(xy(2, 2));
    }
 
+   @Test
+   public void test_should_win_as_fast_as_possible() {
+      MinMaxTicTacToePlayer player1 = new MinMaxTicTacToePlayer(TicTacToePlayerType.O, 3);
+      RandomTicTacToePlayer player2 = new RandomTicTacToePlayer(TicTacToePlayerType.X);
+
+      TicTacToeGameState gameState = new TicTacToeGameState.TicTacToeGameStateBuilder()
+              .withPlayer1(player1, Arrays.asList(xy(1, 2), xy(2, 2)))
+              .withPlayer2(player2, Arrays.asList(xy(2, 0), xy(2, 1)))
+              .build();
+
+      Optional<Player.Action> actionOptional = player1.play(gameState);
+
+      Assertions.assertThat(actionOptional).isPresent();
+      Assertions.assertThat(((PlayOnAction)actionOptional.get()).getCoordinate()).isEqualTo(xy(0, 2));
+   }
+
+   @Test
+   public void test_should_defend_as_long_as_possible() {
+      RandomTicTacToePlayer player1 = new RandomTicTacToePlayer(TicTacToePlayerType.X);
+      MinMaxTicTacToePlayer player2 = new MinMaxTicTacToePlayer(TicTacToePlayerType.O, 3);
+
+      TicTacToeGameState gameState = new TicTacToeGameState.TicTacToeGameStateBuilder()
+              .withPlayer1(player1, Arrays.asList(xy(1, 2), xy(2, 2), xy(0, 1)))
+              .withPlayer2(player2, Arrays.asList(xy(2, 0), xy(2, 1)))
+              .build();
+
+      Optional<Player.Action> actionOptional = player2.play(gameState);
+
+      Assertions.assertThat(actionOptional).isPresent();
+      Assertions.assertThat(((PlayOnAction)actionOptional.get()).getCoordinate()).isEqualTo(xy(0, 2));
+   }
+
    private Coordinate xy(int x, int y) {
       return new Coordinate(x, y);
    }

@@ -112,6 +112,7 @@ public class Player {
                     mmlog(() -> gameState);
                     nodeScore = winner.get() == config.maxPlayer ? Integer.MAX_VALUE : Integer.MIN_VALUE;
                     depthOfScoringBestNextAction = depth;
+                    minMaxStat.incNbOfTerminalNodes();
                 } else if (isLeaf()) {
                     long nanoTimeBeforeScoring = System.nanoTime();
                     nodeScore = config.score(gameState);
@@ -130,6 +131,7 @@ public class Player {
                     if (possibleActions.isEmpty()) {
                         score = config.score(gameState);
                         depthOfScoringBestNextAction = depth;
+                        minMaxStat.incNbOfTerminalNodes();
                     } else {
                         for (Action possibleAction : possibleActions) {
                             MinMaxNode childNode = new MinMaxNode<>(possibleAction.accept(gameState), config, minMaxNodeType.switchGamer(), possibleAction, depth + 1, minMaxStat);
