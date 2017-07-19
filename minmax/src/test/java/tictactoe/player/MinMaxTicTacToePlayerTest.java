@@ -60,6 +60,22 @@ public class MinMaxTicTacToePlayerTest {
       Assertions.assertThat(((PlayOnAction)actionOptional.get()).getCoordinate()).isEqualTo(xy(1, 1));
    }
 
+   @Test
+   public void test_should_play_last_possible_action() {
+      MinMaxTicTacToePlayer player1 = new MinMaxTicTacToePlayer(TicTacToePlayerType.O, 3);
+      RandomTicTacToePlayer player2 = new RandomTicTacToePlayer(TicTacToePlayerType.X);
+
+      TicTacToeGameState gameState = new TicTacToeGameState.TicTacToeGameStateBuilder()
+              .withPlayer1(player1, Arrays.asList(xy(0, 0), xy(0, 1), xy(1, 2), xy(2, 0)))
+              .withPlayer2(player2, Arrays.asList(xy(0, 2), xy(1, 0), xy(1, 1), xy(2, 1)))
+              .build();
+
+      Optional<Player.Action> actionOptional = player1.play(gameState);
+
+      Assertions.assertThat(actionOptional).isPresent();
+      Assertions.assertThat(((PlayOnAction)actionOptional.get()).getCoordinate()).isEqualTo(xy(2, 2));
+   }
+
    private Coordinate xy(int x, int y) {
       return new Coordinate(x, y);
    }

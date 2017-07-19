@@ -60,6 +60,9 @@ public class Player {
         final Optional<Action> optionalAction;
         final MinMaxStat minMaxStat;
 
+        Action bestNextAction;
+        int depthOfScoringBestNextAction;
+
         Integer siblingsMaxScore;
         Integer siblingsMinScore;
         List<MinMaxNode> children = new ArrayList<>();
@@ -72,6 +75,7 @@ public class Player {
             this.depth = depth;
             this.config = config;
             this.minMaxStat = minMaxStat;
+            depthOfScoringBestNextAction = config.maxDepth;
 
             minMaxStat.incNbOfNodes();
         }
@@ -107,10 +111,12 @@ public class Player {
                     mmlog(() -> "Winner found at depth " + depth + ". Winner: " + winner.get());
                     mmlog(() -> gameState);
                     nodeScore = winner.get() == config.maxPlayer ? Integer.MAX_VALUE : Integer.MIN_VALUE;
+                    depthOfScoringBestNextAction = depth;
                 } else if (isLeaf()) {
                     long nanoTimeBeforeScoring = System.nanoTime();
                     nodeScore = config.score(gameState);
                     minMaxStat.addScoringTimeNano(System.nanoTime() - nanoTimeBeforeScoring);
+                    depthOfScoringBestNextAction = depth;
                     mmlog(() -> "Scoring leaf at depth " + depth + " : " + nodeScore);
                     mmlog(() -> gameState);
                 } else {
@@ -120,25 +126,47 @@ public class Player {
 
                     List<Integer> childrenScores = new ArrayList<>();
                     List<Action> possibleActions = gameState.possibleActions();
-                    for (Action possibleAction : possibleActions) {
-                        MinMaxNode childNode = new MinMaxNode<>(possibleAction.accept(gameState), config, minMaxNodeType.switchGamer(), possibleAction, depth + 1, minMaxStat);
-                        children.add(childNode);
 
-                        mmlog(() -> childrenScores);
-                        childNode.addSiblingScores(childrenScores);
+                    if (possibleActions.isEmpty()) {
+                        score = config.score(gameState);
+                        depthOfScoringBestNextAction = depth;
+                    } else {
+                        for (Action possibleAction : possibleActions) {
+                            MinMaxNode childNode = new MinMaxNode<>(possibleAction.accept(gameState), config, minMaxNodeType.switchGamer(), possibleAction, depth + 1, minMaxStat);
+                            children.add(childNode);
 
-                        int childScore = childNode.score();
-                        childrenScores.add(childScore);
+                            mmlog(() -> childrenScores);
+                            childNode.addSiblingScores(childrenScores);
 
-                        if (score == null) {
-                            score = childScore;
-                        } else {
-                            score = minMaxNodeType.selectScore(score, childScore);
-                        }
+                            int childScore = childNode.score();
+                            childrenScores.add(childScore);
 
-                        if (minMaxNodeType.shouldStopScoring(score, this)) {
-                            mmlog(() -> "Pruning branch at depth  " + depth + " : " + childScore + " siblings=" + siblingsMaxScore + "," + siblingsMinScore + "," + minMaxNodeType);
-                            break;
+                            if (score == null) {
+                                score = childScore;
+                                bestNextAction = possibleAction;
+                                depthOfScoringBestNextAction = childNode.depthOfScoringBestNextAction;
+                            } else {
+                                if (score == childScore) {
+                                    int selectedDepthOfScoringBestNextAction = minMaxNodeType.selectDepth(depthOfScoringBestNextAction, childNode.depthOfScoringBestNextAction);
+
+                                    if (selectedDepthOfScoringBestNextAction != depthOfScoringBestNextAction) {
+                                        depthOfScoringBestNextAction = selectedDepthOfScoringBestNextAction;
+                                        bestNextAction = possibleAction;
+                                    }
+                                } else {
+                                    int selectedScore = minMaxNodeType.selectScore(score, childScore);
+
+                                    if (selectedScore != score) {
+                                        score = selectedScore;
+                                        bestNextAction = possibleAction;
+                                    }
+                                }
+                            }
+
+                            if (minMaxNodeType.shouldStopScoring(score, this)) {
+                                mmlog(() -> "Pruning branch at depth  " + depth + " : " + childScore + " siblings=" + siblingsMaxScore + "," + siblingsMinScore + "," + minMaxNodeType);
+                                break;
+                            }
                         }
                     }
 
@@ -162,11 +190,11 @@ public class Player {
         public Optional<Action> bestAction() {
             long timeBeforeScoring = System.currentTimeMillis();
 
-            int score = score();
+            if (nodeScore == null) {
+                score();
+            }
 
-            Optional<Action> optionalAction = children.stream()
-                    .max(Comparator.comparingInt(MinMaxNode::score))
-                    .flatMap(minMaxNode -> minMaxNode.optionalAction);
+            Optional<Action> optionalAction = Optional.ofNullable(bestNextAction);
 
             minMaxStat.setTotalScoringTime(System.currentTimeMillis() - timeBeforeScoring);
             mmlog(() -> minMaxStat);
@@ -190,7 +218,11 @@ public class Player {
             }
 
             public boolean shouldStopScoring(int newChildScore, MinMaxNode<?> minMaxNode) {
-                return newChildScore == Integer.MAX_VALUE ||  (minMaxNode.siblingsMinScore != null && minMaxNode.siblingsMinScore <= newChildScore);
+                return minMaxNode.siblingsMinScore != null && minMaxNode.siblingsMinScore <= newChildScore;
+            }
+
+            public int selectDepth(int depth1, int depth2) {
+                return Math.min(depth1, depth2);
             }
         }, MIN {
             Integer selectScore(Integer score1, int score2) {
@@ -202,7 +234,11 @@ public class Player {
             }
 
             public boolean shouldStopScoring(int newChildScore, MinMaxNode<?> minMaxNode) {
-                return newChildScore == Integer.MIN_VALUE || (minMaxNode.siblingsMaxScore != null && minMaxNode.siblingsMaxScore >= newChildScore);
+                return minMaxNode.siblingsMaxScore != null && minMaxNode.siblingsMaxScore >= newChildScore;
+            }
+
+            public int selectDepth(int depth1, int depth2) {
+                return Math.max(depth1, depth2);
             }
         };
 
@@ -211,6 +247,8 @@ public class Player {
         abstract MinMaxNodeType switchGamer();
 
         abstract boolean shouldStopScoring(int newChildScore, MinMaxNode<?> minMaxNode);
+
+        public abstract int selectDepth(int depth1, int depth2);
     }
 
     public static class MinMaxStat {
