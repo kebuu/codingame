@@ -1,11 +1,11 @@
 package tictactoe.player;
 
-import minmax.Player;
-import tictactoe.TicTacToeGameState;
-
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+
+import minmax.Player;
+import tictactoe.TicTacToeGameState;
 
 public class RandomTicTacToePlayer extends BaseTicTacToePlayer {
 
@@ -13,7 +13,6 @@ public class RandomTicTacToePlayer extends BaseTicTacToePlayer {
 
     public RandomTicTacToePlayer(TicTacToePlayerType type) {
         super(type);
-        random.setSeed(2000);
     }
 
     public Optional<Player.Action> play(TicTacToeGameState gameState) {

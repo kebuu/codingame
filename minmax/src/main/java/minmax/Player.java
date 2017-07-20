@@ -57,10 +57,11 @@ public class Player {
         final MinMaxConfig<T> config;
         final MinMaxNodeType minMaxNodeType;
         final int depth;
-        final Optional<Action> optionalAction;
+        final Action comingFromAction;
         final MinMaxStat minMaxStat;
 
         Action bestNextAction;
+        MinMaxNode<T> bestNextNode;
         int depthOfScoringBestNextAction;
 
         Integer siblingsMaxScore;
@@ -71,7 +72,7 @@ public class Player {
         MinMaxNode(T gameState, MinMaxConfig<T> config, MinMaxNodeType minMaxNodeType, Action action, int depth, MinMaxStat minMaxStat) {
             this.gameState = gameState;
             this.minMaxNodeType = minMaxNodeType;
-            this.optionalAction = Optional.ofNullable(action);
+            this.comingFromAction = action;
             this.depth = depth;
             this.config = config;
             this.minMaxStat = minMaxStat;
@@ -100,23 +101,21 @@ public class Player {
 
         int score() {
             if (nodeScore == null) {
+                mmLog(() -> "Scoring node at depth " + depth + " (" + minMaxNodeType + ")");
+                mmLog(() -> gameState);
+
                 if (depth == config.maxDepth) {
                     long nanoTimeBeforeScoring = System.nanoTime();
                     nodeScore = config.score(gameState);
                     minMaxStat.addScoringTimeNano(System.nanoTime() - nanoTimeBeforeScoring);
                     depthOfScoringBestNextAction = depth;
-                    mmlog(() -> "Scoring leaf at depth " + depth + " : " + nodeScore);
-                    mmlog(() -> gameState);
                 } else if (gameState.getWinner().isPresent()) {
                     Optional<? extends GamePlayer> winner = gameState.getWinner();
-                    mmlog(() -> "Winner found at depth " + depth + ". Winner: " + winner.get());
-                    mmlog(() -> gameState);
+                    mmLog(() -> "Winner found at depth " + depth + ". Winner: " + winner.get());
                     nodeScore = winner.get() == config.maxPlayer ? Integer.MAX_VALUE : Integer.MIN_VALUE;
                     depthOfScoringBestNextAction = depth;
                     minMaxStat.incNbOfTerminalNodes();
                 } else  {
-                    mmlog(() -> "Scoring node at depth " + depth + " (" + minMaxNodeType + ")");
-                    mmlog(() -> gameState);
                     Integer score = null;
 
                     List<Integer> childrenScores = new ArrayList<>();
@@ -128,10 +127,13 @@ public class Player {
                         minMaxStat.incNbOfTerminalNodes();
                     } else {
                         for (Action possibleAction : possibleActions) {
-                            MinMaxNode childNode = new MinMaxNode<>(possibleAction.accept(gameState), config, minMaxNodeType.switchGamer(), possibleAction, depth + 1, minMaxStat);
+                            long nanoTimeComputingGameState = System.nanoTime();
+                            T nextGameState = possibleAction.accept(gameState);
+                            minMaxStat.addTimeComputingGameState(System.nanoTime() - nanoTimeComputingGameState);
+
+                            MinMaxNode<T> childNode = new MinMaxNode<>(nextGameState, config, minMaxNodeType.switchGamer(), possibleAction, depth + 1, minMaxStat);
                             children.add(childNode);
 
-                            mmlog(() -> childrenScores);
                             childNode.addSiblingScores(childrenScores);
 
                             int childScore = childNode.score();
@@ -140,6 +142,7 @@ public class Player {
                             if (score == null) {
                                 score = childScore;
                                 bestNextAction = possibleAction;
+                                bestNextNode = childNode;
                                 depthOfScoringBestNextAction = childNode.depthOfScoringBestNextAction;
                             } else {
                                 if (score == childScore) {
@@ -148,6 +151,7 @@ public class Player {
                                     if (selectedDepthOfScoringBestNextAction != depthOfScoringBestNextAction) {
                                         depthOfScoringBestNextAction = selectedDepthOfScoringBestNextAction;
                                         bestNextAction = possibleAction;
+                                        bestNextNode = childNode;
                                     }
                                 } else {
                                     int selectedScore = minMaxNodeType.selectScore(score, childScore);
@@ -155,19 +159,20 @@ public class Player {
                                     if (selectedScore != score) {
                                         score = selectedScore;
                                         bestNextAction = possibleAction;
+                                        bestNextNode = childNode;
                                     }
                                 }
                             }
 
                             if (minMaxNodeType.shouldStopScoring(score, this)) {
-                                mmlog(() -> "Pruning branch at depth  " + depth + " : " + childScore + " siblings=" + siblingsMaxScore + "," + siblingsMinScore + "," + minMaxNodeType);
+                                mmLog(() -> "Pruning branch at depth  " + depth + " : " + childScore + " siblings=" + siblingsMaxScore + "," + siblingsMinScore + "," + minMaxNodeType);
                                 break;
                             }
                         }
                     }
 
                     nodeScore = score;
-                    mmlog(() -> "Scoring node at depth " + depth + " (" + minMaxNodeType + ") > " + nodeScore);
+                    mmLog(() -> "Scoring node at depth " + depth + " (" + minMaxNodeType + ") > " + nodeScore);
                 }
             }
 
@@ -185,17 +190,21 @@ public class Player {
         @SuppressWarnings("unchecked")
         public Optional<Action> bestAction() {
             long timeBeforeScoring = System.currentTimeMillis();
-
             if (nodeScore == null) {
                 score();
             }
-
-            Optional<Action> optionalAction = Optional.ofNullable(bestNextAction);
-
             minMaxStat.setTotalScoringTime(System.currentTimeMillis() - timeBeforeScoring);
-            mmlog(() -> minMaxStat);
 
-            return optionalAction;
+            mmLog(() -> minMaxStat);
+            mmLog(() -> gameState);
+            mmLog(() -> "\nAction path: ");
+            MinMaxNode<T> runningBestNextNode = bestNextNode;
+            while (runningBestNextNode != null) {
+                mmStrLog(runningBestNextNode.comingFromAction);
+                runningBestNextNode = runningBestNextNode.bestNextNode;
+            }
+
+            return Optional.ofNullable(this.bestNextAction);
         }
 
         public MinMaxStat getStat() {
@@ -214,7 +223,7 @@ public class Player {
             }
 
             public boolean shouldStopScoring(int newChildScore, MinMaxNode<?> minMaxNode) {
-                return minMaxNode.siblingsMinScore != null && minMaxNode.siblingsMinScore <= newChildScore;
+                return newChildScore == Integer.MAX_VALUE ||  (minMaxNode.siblingsMinScore != null && minMaxNode.siblingsMinScore <= newChildScore);
             }
 
             public int selectDepth(int depth1, int depth2) {
@@ -230,7 +239,7 @@ public class Player {
             }
 
             public boolean shouldStopScoring(int newChildScore, MinMaxNode<?> minMaxNode) {
-                return minMaxNode.siblingsMaxScore != null && minMaxNode.siblingsMaxScore >= newChildScore;
+                return newChildScore == Integer.MIN_VALUE || (minMaxNode.siblingsMaxScore != null && minMaxNode.siblingsMaxScore >= newChildScore);
             }
 
             public int selectDepth(int depth1, int depth2) {
@@ -255,6 +264,8 @@ public class Player {
         long totalScoreTime;
         long cumulativeScoringTimeNano;
         long nbOfScoring;
+        long cumulativeComputingGameStateTimeNano;
+        long nbOfComputingGameState;
 
         public MinMaxStat() {
             nodesCreationStartTime = System.currentTimeMillis();
@@ -277,7 +288,6 @@ public class Player {
         }
 
         public void addScoringTimeNano(long scoringTime) {
-            mmlog(() -> "addScoringTimeNano:" + scoringTime);
             cumulativeScoringTimeNano += scoringTime;
             nbOfScoring++;
         }
@@ -290,6 +300,10 @@ public class Player {
             return (cumulativeScoringTimeNano / 1_000_000) / (float) Math.max(1, nbOfScoring);
         }
 
+        public float meanComputingGameStateTimeMs() {
+            return (cumulativeComputingGameStateTimeNano / 1_000_000) / (float) Math.max(1, nbOfComputingGameState);
+        }
+
         @Override
         public String toString() {
             return "MinMaxStat{" +
@@ -300,14 +314,28 @@ public class Player {
                     ", \ncumulativeScoringTimeMs=" + (cumulativeScoringTimeNano / 1_000_000) +
                     ", \nnbOfScoring=" + nbOfScoring +
                     ", \nmeanScoringTimeMs=" + meanScoringTimeMs() +
+                    ", \ncumulativeComputingGameStateTimeNano=" + (cumulativeComputingGameStateTimeNano / 1_000_000) +
+                    ", \nnbOfComputingGameState=" + nbOfComputingGameState +
+                    ", \nmeanComputingGameStateTimeMs=" + nbOfComputingGameState +
                     '}';
+        }
+
+        public void addTimeComputingGameState(long timeComputingGameState) {
+            cumulativeComputingGameStateTimeNano += timeComputingGameState;
+            nbOfComputingGameState++;
         }
     }
 
     @SafeVarargs
-    private static void mmlog(Supplier<Object>... logs) {
+    private static void mmLog(Supplier<Object>... logs) {
         if(MIN_MAX_LOG) {
             System.err.println(Arrays.asList(logs).stream().map(Supplier::get).map(Objects::toString).collect(Collectors.joining(", ")));
+        }
+    }
+
+    private static void mmStrLog(Object... logs) {
+        if(MIN_MAX_LOG) {
+            System.err.println(Arrays.asList(logs).stream().map(Objects::toString).collect(Collectors.joining(", ")));
         }
     }
 }

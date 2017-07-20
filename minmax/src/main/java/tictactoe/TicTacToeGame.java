@@ -1,18 +1,21 @@
 package tictactoe;
 
-import minmax.Player;
-import tictactoe.player.*;
+import java.util.Optional;
 
-import java.util.*;
+import minmax.Player;
+import tictactoe.player.MinMaxTicTacToePlayer;
+import tictactoe.player.RandomTicTacToePlayer;
+import tictactoe.player.TicTacToePlayer;
+import tictactoe.player.TicTacToePlayerType;
 
 public class TicTacToeGame {
 
     public static void main(String[] args) {
         TicTacToeGame ticTacToeGame = new TicTacToeGame();
 
-        //TicTacToePlayer xPlayer = new RandomTicTacToePlayer(TicTacToePlayerType.X);
-        TicTacToePlayer xPlayer = new InteractiveTicTacToePlayer(TicTacToePlayerType.X);
-        TicTacToePlayer oPlayer = new MinMaxTicTacToePlayer(TicTacToePlayerType.O, 2);
+        TicTacToePlayer xPlayer = new RandomTicTacToePlayer(TicTacToePlayerType.X);
+        //TicTacToePlayer xPlayer = new InteractiveTicTacToePlayer(TicTacToePlayerType.X);
+        TicTacToePlayer oPlayer = new MinMaxTicTacToePlayer(TicTacToePlayerType.O, 3);
         //TicTacToePlayer xPlayer = new FirstPossibleActionPlayer();
         Optional<TicTacToePlayer> winner = ticTacToeGame.play(oPlayer, xPlayer);
         System.err.println(winner);

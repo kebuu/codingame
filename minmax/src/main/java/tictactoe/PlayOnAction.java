@@ -36,4 +36,9 @@ public class PlayOnAction implements Player.Action {
     public TicTacToePlayer getTicTacToePlayer() {
         return ticTacToePlayer;
     }
+
+    @Override
+    public String toString() {
+        return coordinate.toString() + " (" + ticTacToePlayer.getType() + ")";
+    }
 }
