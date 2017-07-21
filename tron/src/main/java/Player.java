@@ -205,13 +205,13 @@ class Player {
         Coordinate coordinateAt(LumicycleDirection lumicycleDirection) {
             switch (lumicycleDirection) {
                 case DOWN:
-                    return xy(x, y - 1);
+                    return xy(x, y + 1);
                 case LEFT:
                     return xy(x -1 , y);
                 case RIGHT:
                     return xy(x + 1, y);
                 case UP:
-                    return xy(x, y + 1);
+                    return xy(x, y - 1);
                 default:
                     throw new IllegalStateException("Java...");
             }
