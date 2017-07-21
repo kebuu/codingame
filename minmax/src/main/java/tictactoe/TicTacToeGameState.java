@@ -1,11 +1,16 @@
 package tictactoe;
 
-import minmax.Player;
-import tictactoe.player.TicTacToePlayer;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import minmax.Player;
+import tictactoe.player.TicTacToePlayer;
 
 public class TicTacToeGameState implements Player.GameState {
 
@@ -35,7 +40,7 @@ public class TicTacToeGameState implements Player.GameState {
     }
 
     @Override
-    public List<Player.Action> possibleActions() {
+    public List<Player.Action> possibleActions(Player.MinMaxNodeType minMaxNodeType) {
         List<Player.Action> actions = new ArrayList<>();
 
         for(int i = 0; i < 3; i++) {

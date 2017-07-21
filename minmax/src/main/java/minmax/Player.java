@@ -6,8 +6,7 @@ import java.util.stream.Collectors;
 
 public class Player {
 
-    private static final boolean MIN_MAX_LOG = true;
-    
+
     public static void main(String[] args) {
         GameState gameState = null;
         MinMaxConfig<GameState> minMaxConfig = null;
@@ -17,8 +16,10 @@ public class Player {
                 .ifPresent(action -> System.out.println(action.asString()));
     }
 
+    private static final boolean MIN_MAX_LOG = true;
+
     public interface GameState {
-        List<Action> possibleActions();
+        List<Action> possibleActions(MinMaxNodeType minMaxNodeType);
 
         default Optional<? extends GamePlayer> getWinner() {
             return Optional.empty();
@@ -50,7 +51,7 @@ public class Player {
         }
     }
 
-    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+    @SuppressWarnings({"OptionalUsedAsFieldOrParameterType", "Duplicates"})
     public static class MinMaxNode<T extends GameState> {
 
         final T gameState;
@@ -119,7 +120,7 @@ public class Player {
                     Integer score = null;
 
                     List<Integer> childrenScores = new ArrayList<>();
-                    List<Action> possibleActions = gameState.possibleActions();
+                    List<Action> possibleActions = gameState.possibleActions(minMaxNodeType);
 
                     if (possibleActions.isEmpty()) {
                         score = config.score(gameState);
