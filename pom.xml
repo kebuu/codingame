@@ -17,6 +17,7 @@
         <module>skynet</module>
         <module>skynet2</module>
         <module>descent</module>
+        <module>tron</module>
     </modules>
 
     <dependencies>
