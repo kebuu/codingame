@@ -1,9 +1,4 @@
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Scanner;
+import java.util.*;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -15,105 +10,253 @@ import java.util.stream.Stream;
  **/
 class Player {
 
+    public static final int X_SIZE = 30;
+    public static final int Y_SIZE = 20;
+    private static long startTurnTimestamp;
+    private static int turn;
+    private static boolean LOG = true;
+
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
+        TronMinMaxConfig tronMinMaxConfig = new TronMinMaxConfig(new TronPlayer());
 
         // game loop
         TronGameState tronGameState = null;
         while (true) {
             int N = in.nextInt(); // total number of players (2 to 4).
+
+            startTurnTimestamp = System.currentTimeMillis();
             int myLumicycleId = in.nextInt(); // your player number (0 to 3).
 
             if (tronGameState == null) {
-                ArrayList<Lumicycle> lumicycles = new ArrayList<>();
-                for (int lumicycleId = 0; lumicycleId < N; lumicycleId++) {
-                    lumicycles.add(new Lumicycle(lumicycleId));
-                }
-                tronGameState = new TronGameState(myLumicycleId, lumicycles);
+                tronGameState = new TronGameState(myLumicycleId, N);
+                System.err.println("Index de mon lumicycle:" + N);
+                logElapsedTime("After game state");
             }
 
-            for (int lumicycleId = 0; lumicycleId < N; lumicycleId++) {
+            for (int lumicycleIndex = 0; lumicycleIndex < N; lumicycleIndex++) {
                 int X0 = in.nextInt(); // starting X coordinate of lightcycle (or -1)
                 int Y0 = in.nextInt(); // starting Y coordinate of lightcycle (or -1)
                 int X1 = in.nextInt(); // starting X coordinate of lightcycle (can be the same as X0 if you play before this player)
                 int Y1 = in.nextInt(); // starting Y coordinate of lightcycle (can be the same as Y0 if you play before this player)
 
-                Lumicycle lumicycle = tronGameState.lumicycles.get(lumicycleId);
-                if (lumicycle != null && X1 != -1) {
-                    lumicycle.setNewPosition(xy(X1, Y1));
+                Lumicycle lumicycle = tronGameState.lumicycles[lumicycleIndex];
+                if (lumicycle == null) {
+                    lumicycle = new Lumicycle(lumicycleIndex, xy(X1, Y1));
+                } else {
+                    lumicycle = lumicycle.withNewPosition(xy(X1, Y1));
                 }
+                tronGameState.setLumicycle(lumicycle);
+            }
+            logElapsedTime("After lumicycle");
+            System.err.println("turn:"+turn);
+
+            if (turn == 0) {
+                tronMinMaxConfig.maxDistance = 5;
+                tronMinMaxConfig.maxDepth = 1;
+            } else if (turn < 50){
+                tronMinMaxConfig.maxDistance = 15;
+                tronMinMaxConfig.maxDepth = 1;
+            } else {
+                tronMinMaxConfig.maxDistance = 20;
             }
 
             // Write an action using System.out.println()
             // To debug: System.err.println("Debug messages...");
+            MinMaxRootNode<TronGameState> minMaxRootNode = new MinMaxRootNode<>(tronGameState, tronMinMaxConfig);
+            logElapsedTime("Before best action");
+            Optional<Action> actionOptional = minMaxRootNode.bestAction();
+            logElapsedTime("After best action");
 
-            List<Action> actions = tronGameState.possibleActions(MinMaxNodeType.MAX);
-            System.err.println("Playing from: " + actions);
-            System.err.println("Playing: " + actions.get(0).asString());
-            System.out.println(actions.get(0).asString()); // A single line with UP, DOWN, LEFT or RIGHT
+            actionOptional.ifPresent(action -> {
+                System.err.println(action.asString());
+                System.out.println(action.asString()); // A single line with UP, DOWN, LEFT or RIGHT
+            });
+
+            turn++;
+        }
+    }
+
+    static class TronPlayer implements GamePlayer {
+
+    }
+
+    static class CoordinateManager {
+
+        static Coordinate[][] validCoordinates = new Coordinate[X_SIZE][Y_SIZE];
+
+        static {
+            for (int i = 0; i < X_SIZE; i ++) {
+                for (int j = 0; j < Y_SIZE; j ++) {
+                    validCoordinates[i][j] = new Coordinate(i, j);
+                }
+            }
+        }
+
+        static Coordinate get(int x, int y) {
+            if (x < 0 || y < 0 || x >= X_SIZE || y >= Y_SIZE) {
+                return null;
+            } else {
+                return validCoordinates[x][y];
+            }
+        }
+    }
+
+    static class TronMinMaxConfig extends MinMaxConfig<TronGameState> {
+
+        private int maxDistance = 10;
+
+        public TronMinMaxConfig(GamePlayer maxPlayer) {
+            super(1, maxPlayer);
+        }
+
+        @Override
+        public int score(TronGameState gameState) {
+            Lumicycle myLumicycle = gameState.getMyLumicycle();
+
+            Queue<Coordinate> onTheRoad = new ArrayDeque<>();
+            Set<Coordinate> visited = new HashSet<>();
+
+            if (myLumicycle.position != null) {
+                visited.add(myLumicycle.position);
+            }
+
+            List<Coordinate> coordinatesToVisit = gameState.accessibleCoordinates(myLumicycle).stream()
+                    .filter(coordinate -> !visited.contains(coordinate))
+                    .collect(Collectors.toList());
+
+            onTheRoad.addAll(coordinatesToVisit);
+
+            Map<Integer, Integer> nbOfVisitedCoordinateByDistance = new HashMap<>();
+            int distance = 1;
+
+            logElapsedTime("Before while ");
+
+            while (!onTheRoad.isEmpty() && distance < maxDistance) {
+                nbOfVisitedCoordinateByDistance.put(distance, onTheRoad.size());
+
+                List<Coordinate> newOnTheRoad = new ArrayList<>();
+                for (Coordinate coordinate = onTheRoad.poll(); coordinate != null; coordinate = onTheRoad.poll()) {
+                    newOnTheRoad.addAll(coordinate.neighbors());
+                    visited.add(coordinate);
+                }
+                List<Coordinate> filterNewOnTheRoad = newOnTheRoad.stream()
+                        .filter(coordinate -> gameState.isAllowed(coordinate) && !visited.contains(coordinate))
+                        .collect(Collectors.toList());
+
+                onTheRoad.addAll(filterNewOnTheRoad);
+
+                distance++;
+            }
+
+            log(() -> nbOfVisitedCoordinateByDistance);
+
+            return nbOfVisitedCoordinateByDistance.size() + (int)Math.sqrt(nbOfVisitedCoordinateByDistance.values().stream().mapToInt(Integer::intValue).sum());
         }
     }
 
     static class TronGameState implements GameState {
-        final int maxX = 29;
-        final int maxY = 19;
-        final int myLumicycleId;
-        final List<Lumicycle> lumicycles;
-        final List<Coordinate> usedCoordinates;
+        final int myLumicycleIndex;
+        final Lumicycle[] lumicycles;
+        Map<Integer, List<Coordinate>> usedCoordinatesByLumicycleIndex = new HashMap<>();
+        Set<Coordinate> allUsedCoordinates = new HashSet<>();
 
-        TronGameState(int myLumicycleId, List<Lumicycle> lumicycles) {
-            this.myLumicycleId = myLumicycleId;
-            this.lumicycles = lumicycles;
+        TronGameState(int myLumicycleIndex, int nbOfPlayers) {
+            this.myLumicycleIndex = myLumicycleIndex;
+            this.lumicycles = new Lumicycle[nbOfPlayers];
 
-            usedCoordinates = lumicycles.stream().flatMap(lumicycle -> lumicycle.oldPositions.stream()).collect(Collectors.toList());
-            usedCoordinates.addAll(lumicycles.stream().map(lumicycle -> lumicycle.currentPosition).collect(Collectors.toList()));
+            for (int i = 0; i < nbOfPlayers; i++) {
+                usedCoordinatesByLumicycleIndex.put(i, new ArrayList<>());
+            }
+        }
+
+        List<Coordinate> accessibleCoordinates(Lumicycle lumicycle) {
+            LumicycleDirection[] possibleDirections = lumicycle.direction == null ? LumicycleDirection.values() : lumicycle.direction.others();
+
+            return Stream.of(possibleDirections)
+                    .map(lumicycleDirection -> lumicycle.position.coordinateAt(lumicycleDirection))
+                    .filter(this::isAllowed)
+                    .collect(Collectors.toList());
         }
 
         @Override
         public List<Action> possibleActions(MinMaxNodeType minMaxNodeType) {
             Predicate<Lumicycle> lumicycleIdPredicate;
             if (minMaxNodeType.equals(MinMaxNodeType.MAX)) {
-                lumicycleIdPredicate = lumicycle -> lumicycle.id == myLumicycleId;
+                lumicycleIdPredicate = lumicycle -> lumicycle.index == myLumicycleIndex;
             } else {
-                lumicycleIdPredicate = lumicycle -> lumicycle != null && lumicycle.id != myLumicycleId;
+                lumicycleIdPredicate = lumicycle -> lumicycle != null && lumicycle.index != myLumicycleIndex;
             }
 
-            return lumicycles.stream()
+            return Stream.of(lumicycles)
                 .filter(lumicycleIdPredicate)
                 .flatMap(lumicycle -> {
-                    System.err.println("lumicycle:" + lumicycle);
-                    LumicycleDirection[] possibleDirections = lumicycle.currentDirection == null ? LumicycleDirection.values() : lumicycle.currentDirection.others();
+                    LumicycleDirection[] possibleDirections = lumicycle.direction == null ? LumicycleDirection.values() : lumicycle.direction.others();
+
                     return Stream.of(possibleDirections)
-                        .filter(lumicycleDirection -> isAllowed(lumicycle.currentPosition.coordinateAt(lumicycleDirection)))
-                        .map(lumicycleDirection -> new TronGameAction(lumicycle.id, lumicycleDirection));
+                        .filter(lumicycleDirection -> isAllowed(lumicycle.position.coordinateAt(lumicycleDirection)))
+                        .map(lumicycleDirection -> new TronGameAction(lumicycle.index, lumicycleDirection));
                 })
                 .collect(Collectors.toList());
         }
 
         private boolean isAllowed(Coordinate coordinate) {
-            System.err.println("coordinate:" + coordinate);
-            System.err.println(coordinate.x >= 0 && coordinate.x <= maxX && coordinate.y >= 0 && coordinate.y < maxY
-                                && !usedCoordinates.contains(coordinate));
-            return coordinate.x >= 0 && coordinate.x <= maxX && coordinate.y >= 0 && coordinate.y < maxY
-                    && !usedCoordinates.contains(coordinate);
+            return coordinate != null && coordinate.x >= 0 && coordinate.x < X_SIZE && coordinate.y >= 0 && coordinate.y < Y_SIZE
+                    && !allUsedCoordinates.contains(coordinate);
         }
 
         @Override
         public Optional<? extends GamePlayer> getWinner() {
-            return null;
+            return Optional.empty();
         }
 
-        public <T extends GameState> T withAction(TronGameAction tronGameAction) {
-            return null;
+        public GameState withAction(TronGameAction tronGameAction) {
+            TronGameState newTronGameState = new TronGameState(myLumicycleIndex, lumicycles.length);
+            newTronGameState.allUsedCoordinates.addAll(allUsedCoordinates);
+
+            for (Lumicycle lumicycle : lumicycles) {
+                if (lumicycle.index == tronGameAction.lumicycleIndex) {
+                    Coordinate newPosition = lumicycle.position.coordinateAt(tronGameAction.direction);
+                    Lumicycle newLumicycle = lumicycle.withNewPosition(newPosition);
+
+                    newTronGameState.usedCoordinatesByLumicycleIndex.put(newLumicycle.index, new ArrayList<>(usedCoordinatesByLumicycleIndex.get(newLumicycle.index)));
+                    newTronGameState.setLumicycle(newLumicycle);
+                } else {
+                    newTronGameState.setLumicycle(lumicycle);
+                    newTronGameState.usedCoordinatesByLumicycleIndex.put(lumicycle.index, usedCoordinatesByLumicycleIndex.get(lumicycle.index));
+                }
+            }
+
+
+            return newTronGameState;
+        }
+
+        public Lumicycle getMyLumicycle() {
+            return lumicycles[myLumicycleIndex];
+        }
+
+        public void setLumicycle(Lumicycle lumicycle) {
+            lumicycles[lumicycle.index] = lumicycle;
+
+            usedCoordinatesByLumicycleIndex.get(lumicycle.index).add(lumicycle.position);
+            allUsedCoordinates.add(lumicycle.position);
+        }
+
+        public GameState withAction(MultiTronGameAction multiTronGameAction) {
+            TronGameState newGameState = this;
+            for (TronGameAction action : multiTronGameAction.actions) {
+                newGameState = (TronGameState) newGameState.withAction(action);
+            }
+            return newGameState;
         }
     }
 
     static class TronGameAction implements Action {
-        final int lumicycleId;
+        final int lumicycleIndex;
         final LumicycleDirection direction;
 
-        TronGameAction(int lumicycleId, LumicycleDirection direction) {
-            this.lumicycleId = lumicycleId;
+        TronGameAction(int lumicycleIndex, LumicycleDirection direction) {
+            this.lumicycleIndex = lumicycleIndex;
             this.direction = direction;
         }
 
@@ -122,9 +265,9 @@ class Player {
         }
 
         @Override
-        public <T extends GameState> T accept(T gameState) {
-            TronGameState ticTacToeGameState = (TronGameState) gameState;
-            return ticTacToeGameState.withAction(this);
+        public GameState accept(GameState gameState) {
+            TronGameState tronGameState = (TronGameState) gameState;
+            return tronGameState.withAction(this);
         }
 
         @Override
@@ -133,57 +276,88 @@ class Player {
         }
     }
 
+    static class MultiTronGameAction implements Action {
+        final List<TronGameAction> actions;
+
+        MultiTronGameAction(List<TronGameAction> actions) {
+            this.actions = actions;
+        }
+
+        @Override
+        public String asString() {
+            return actions.toString();
+        }
+
+        @Override
+        public GameState accept(GameState gameState) {
+            TronGameState tronGameState = (TronGameState) gameState;
+            return tronGameState.withAction(this);
+        }
+    }
+
     static class Lumicycle {
-        final int id;
-        Coordinate currentPosition;
-        LumicycleDirection currentDirection;
-        final List<Coordinate> oldPositions;
+        final int index;
+        final Coordinate position;
+        final LumicycleDirection direction;
+        final LumicycleState state;
 
-        Lumicycle(int id) {
-            this(id, null, null, new ArrayList<>());
+        Lumicycle(int index, Coordinate position) {
+            this(index, position, null);
         }
 
-        Lumicycle(int id, Coordinate currentPosition, LumicycleDirection currentDirection) {
-            this(id,currentPosition,currentDirection, new ArrayList<>());
+        Lumicycle(int index, Coordinate position, LumicycleDirection direction) {
+            this(index, position, direction, LumicycleState.ALIVE);
         }
 
-        Lumicycle(int id, Coordinate currentPosition, LumicycleDirection currentDirection, List<Coordinate> oldPositions) {
-            this.id = id;
-            this.currentPosition = currentPosition;
-            this.currentDirection = currentDirection;
-            this.oldPositions = oldPositions;
+        Lumicycle(int index, Coordinate position, LumicycleDirection direction, LumicycleState state) {
+            this.index = index;
+            this.position = position;
+            this.direction = direction;
+            this.state = state;
         }
 
-        void setNewPosition(Coordinate newPosition) {
-            if (currentPosition != null) {
-                oldPositions.add(currentPosition);
-                currentDirection = currentPosition.directionTo(newPosition);
+        Lumicycle withNewPosition(Coordinate newPosition) {
+            LumicycleDirection newDirection = null;
+            if (position != null) {
+                newDirection = position.directionTo(newPosition);
             }
-            currentPosition = newPosition;
-            System.err.println("newPosition:" + newPosition);
-            System.err.println(this);
+            return new Lumicycle(index, newPosition, newDirection);
         }
 
         @Override
         public String toString() {
             return "Lumicycle{" +
-                    "id=" + id +
-                    ", currentPosition=" + currentPosition +
-                    ", currentDirection=" + currentDirection +
-                    ", oldPositions=" + oldPositions +
+                    "id=" + index +
+                    ", position=" + position +
+                    ", direction=" + direction +
                     '}';
         }
     }
 
+    enum LumicycleState {
+        DEAD, ALIVE
+    }
+
     enum LumicycleDirection {
-        UP, DOWN, LEFT, RIGHT;
+        LEFT, RIGHT, UP, DOWN;
+
+        LumicycleDirection opposite() {
+            switch (this) {
+                case UP: return DOWN;
+                case DOWN: return UP;
+                case LEFT: return RIGHT;
+                case RIGHT: return LEFT;
+                default:
+                    throw new IllegalArgumentException();
+            }
+        }
 
         public LumicycleDirection[] others() {
             LumicycleDirection[] others = new LumicycleDirection[3];
 
             int otherIndex = 0;
             for (LumicycleDirection lumicycleDirection : LumicycleDirection.values()) {
-                if (lumicycleDirection != this) {
+                if (lumicycleDirection != this.opposite()) {
                     others[otherIndex] = lumicycleDirection;
                     otherIndex++;
                 }
@@ -196,10 +370,19 @@ class Player {
     static class Coordinate {
         final int x;
         final int y;
+        List<Coordinate> neighbors;
 
         Coordinate(int x, int y) {
             this.x = x;
             this.y = y;
+        }
+
+        List<Coordinate> neighbors() {
+            if (neighbors == null) {
+                neighbors = Arrays.asList(xy(x, y + 1), xy(x, y - 1), xy(x - 1, y), xy(x + 1, y)).stream()
+                        .filter(Objects::nonNull).collect(Collectors.toList());
+            }
+            return neighbors;
         }
 
         Coordinate coordinateAt(LumicycleDirection lumicycleDirection) {
@@ -223,9 +406,9 @@ class Player {
             } else if (x > toCoordinate.x) {
                 return LumicycleDirection.LEFT;
             } else if (y < toCoordinate.y) {
-                return LumicycleDirection.UP;
-            } else {
                 return LumicycleDirection.DOWN;
+            } else {
+                return LumicycleDirection.UP;
             }
         }
 
@@ -257,7 +440,27 @@ class Player {
     }
 
     static Coordinate xy(int x, int y) {
-        return new Coordinate(x, y);
+        return CoordinateManager.get(x, y);
+    }
+
+    static void logElapsedTime(String info) {
+        log(() -> ">>>>> " + info + ":  Elapsed time:" + (System.currentTimeMillis() - startTurnTimestamp));
+    }
+
+    private static void log(Supplier<Object>... logs) {
+        if(LOG) {
+            System.err.println(
+                    Arrays.asList(logs).stream()
+                            .map(Supplier::get)
+                            .map(o -> {
+                                if (o != null && o.getClass().isArray()) {
+                                    return Arrays.asList(o).toString();
+                                } else {
+                                    return Objects.toString(o);
+                                }
+                            })
+                            .collect(Collectors.joining(", ")));
+        }
     }
 
 	/**************************************
@@ -283,8 +486,8 @@ class Player {
     }
 
     public static abstract class MinMaxConfig<T extends GameState> {
-        private final int maxDepth;
-        private final GamePlayer maxPlayer;
+        protected int maxDepth;
+        protected final GamePlayer maxPlayer;
 
         public abstract int score(T gameState);
 
@@ -353,6 +556,7 @@ class Player {
                 mmLog(() -> gameState);
 
                 if (depth == config.maxDepth) {
+                    mmLog(() -> "Reached max depth");
                     long nanoTimeBeforeScoring = System.nanoTime();
                     nodeScore = config.score(gameState);
                     minMaxStat.addScoringTimeNano(System.nanoTime() - nanoTimeBeforeScoring);
@@ -370,10 +574,12 @@ class Player {
                     List<Action> possibleActions = gameState.possibleActions(minMaxNodeType);
 
                     if (possibleActions.isEmpty()) {
+                        mmLog(() -> "No possible actions");
                         score = config.score(gameState);
                         depthOfScoringBestNextAction = depth;
                         minMaxStat.incNbOfTerminalNodes();
                     } else {
+                        mmLog(() -> "Scoring children: " + possibleActions);
                         for (Action possibleAction : possibleActions) {
                             long nanoTimeComputingGameState = System.nanoTime();
                             T nextGameState = possibleAction.accept(gameState);
@@ -420,8 +626,9 @@ class Player {
                     }
 
                     nodeScore = score;
-                    mmLog(() -> "Scoring node at depth " + depth + " (" + minMaxNodeType + ") > " + nodeScore);
                 }
+
+                mmLog(() -> "Scored node at depth " + depth + " action: " + comingFromAction + ",(" + minMaxNodeType + ") -> " + nodeScore);
             }
 
             return nodeScore;

@@ -36,8 +36,8 @@ public class Player {
     }
 
     public static abstract class MinMaxConfig<T extends GameState> {
-        private final int maxDepth;
-        private final GamePlayer maxPlayer;
+        protected int maxDepth;
+        protected final GamePlayer maxPlayer;
 
         public abstract int score(T gameState);
 
@@ -127,6 +127,7 @@ public class Player {
                         depthOfScoringBestNextAction = depth;
                         minMaxStat.incNbOfTerminalNodes();
                     } else {
+                        mmLog(() -> "Scoring children: " + possibleActions);
                         for (Action possibleAction : possibleActions) {
                             long nanoTimeComputingGameState = System.nanoTime();
                             T nextGameState = possibleAction.accept(gameState);
@@ -173,8 +174,9 @@ public class Player {
                     }
 
                     nodeScore = score;
-                    mmLog(() -> "Scoring node at depth " + depth + " (" + minMaxNodeType + ") > " + nodeScore);
                 }
+
+                mmLog(() -> "Scored node at depth " + depth + " action: " + comingFromAction + ",(" + minMaxNodeType + ") -> " + nodeScore);
             }
 
             return nodeScore;

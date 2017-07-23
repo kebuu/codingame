@@ -1,4 +1,5 @@
 Réutiliser l'arbre d'un tour sur l'autre
 Approfondir l'arbre si le temps le permet
-Ne pas recalculer plusieurs fois les actions possibles pour un tour
 Nettoyer les logs
+Gerer la mort de l'enemie
+gerer les actions enemy
