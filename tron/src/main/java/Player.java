@@ -73,6 +73,8 @@ class Player {
                 System.out.println(action.asString()); // A single line with UP, DOWN, LEFT or RIGHT
             });
 
+            System.gc();
+
             turn++;
         }
     }
@@ -114,44 +116,42 @@ class Player {
         public int score(TronGameState gameState) {
             Lumicycle myLumicycle = gameState.getMyLumicycle();
 
-            Queue<Coordinate> onTheRoad = new ArrayDeque<>();
             Set<Coordinate> visited = new HashSet<>();
+            visited.add(myLumicycle.position);
 
-            if (myLumicycle.position != null) {
-                visited.add(myLumicycle.position);
-            }
-
-            List<Coordinate> coordinatesToVisit = gameState.accessibleCoordinates(myLumicycle).stream()
-                    .filter(coordinate -> !visited.contains(coordinate))
-                    .collect(Collectors.toList());
-
-            onTheRoad.addAll(coordinatesToVisit);
+            Set<Coordinate> coordinatesToVisit = gameState.accessibleCoordinates(myLumicycle).stream()
+                    .filter(coordinate -> gameState.isAllowed(coordinate))
+                    .collect(Collectors.toSet());
 
             Map<Integer, Integer> nbOfVisitedCoordinateByDistance = new HashMap<>();
             int distance = 1;
 
             logElapsedTime("Before while ");
 
-            while (!onTheRoad.isEmpty() && distance < maxDistance) {
-                nbOfVisitedCoordinateByDistance.put(distance, onTheRoad.size());
-
-                List<Coordinate> newOnTheRoad = new ArrayList<>();
-                for (Coordinate coordinate = onTheRoad.poll(); coordinate != null; coordinate = onTheRoad.poll()) {
-                    newOnTheRoad.addAll(coordinate.neighbors());
-                    visited.add(coordinate);
+            while (!coordinatesToVisit.isEmpty() && distance < maxDistance) {
+                nbOfVisitedCoordinateByDistance.put(distance, coordinatesToVisit.size());
+                Set<Coordinate> newOnTheRoad = new HashSet<>();
+                Iterator<Coordinate> coordinatesToVisitIterator = coordinatesToVisit.iterator();
+                while (coordinatesToVisitIterator.hasNext()) {
+                    Coordinate visitedCoordinate = coordinatesToVisitIterator.next();
+                    newOnTheRoad.addAll(visitedCoordinate.neighbors());
+                    visited.add(visitedCoordinate);
+                    coordinatesToVisitIterator.remove();
                 }
+
+                assert coordinatesToVisit.isEmpty();
+
                 List<Coordinate> filterNewOnTheRoad = newOnTheRoad.stream()
                         .filter(coordinate -> gameState.isAllowed(coordinate) && !visited.contains(coordinate))
                         .collect(Collectors.toList());
 
-                onTheRoad.addAll(filterNewOnTheRoad);
-
+                coordinatesToVisit.addAll(filterNewOnTheRoad);
                 distance++;
             }
 
             log(() -> nbOfVisitedCoordinateByDistance);
 
-            return nbOfVisitedCoordinateByDistance.size() + (int)Math.sqrt(nbOfVisitedCoordinateByDistance.values().stream().mapToInt(Integer::intValue).sum());
+            return nbOfVisitedCoordinateByDistance.size();
         }
     }
 
