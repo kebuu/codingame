@@ -49,6 +49,12 @@ class Player {
                     lumicycle = lumicycle.withNewPosition(xy(X1, Y1));
                 }
                 tronGameState.setLumicycle(lumicycle);
+
+                if (turn == 0) {
+                    if (!xy(X1, Y1).equals(xy(X0, Y0))) {
+                        tronGameState.addLumicycleTail(lumicycleIndex, xy(X0, Y0));
+                    }
+                }
             }
 
             if (tronMinMaxConfig == null) {
@@ -61,11 +67,11 @@ class Player {
             if (turn == 0) {
                 tronMinMaxConfig.maxDistance = 5;
                 tronMinMaxConfig.maxDepth = 1;
-            } else if (turn < 50){
+            } else if (turn < 5){
                 tronMinMaxConfig.maxDistance = 15;
                 tronMinMaxConfig.maxDepth = 1;
             } else {
-                tronMinMaxConfig.maxDistance = 20;
+                tronMinMaxConfig.maxDistance = 40;
             }
 
             // Write an action using System.out.println()
@@ -279,6 +285,11 @@ class Player {
                 newGameState = (TronGameState) newGameState.withAction(action);
             }
             return newGameState;
+        }
+
+        public void addLumicycleTail(int lumicycleIndex, Coordinate xy) {
+            usedCoordinatesByLumicycleIndex.get(lumicycleIndex).add(xy);
+            allUsedCoordinates.add(xy);
         }
     }
 
