@@ -195,12 +195,16 @@ class Player {
         }
 
         List<Coordinate> accessibleCoordinates(Lumicycle lumicycle) {
-            LumicycleDirection[] possibleDirections = lumicycle.direction == null ? LumicycleDirection.values() : lumicycle.direction.others();
+            LumicycleDirection[] possibleDirections = possibleDirections(lumicycle);
 
             return Stream.of(possibleDirections)
                     .map(lumicycle.position::coordinateAt)
                     .filter(this::isAllowed)
                     .collect(Collectors.toList());
+        }
+
+        private Player.LumicycleDirection[] possibleDirections(Player.Lumicycle lumicycle) {
+            return lumicycle.direction == null ? Player.LumicycleDirection.values() : lumicycle.direction.others();
         }
 
         @Override
@@ -212,16 +216,20 @@ class Player {
                 lumicycleIdPredicate = lumicycle -> lumicycle != null && lumicycle.getIndex() != myLumicycleIndex;
             }
 
-            return Stream.of(lumicycles)
-                .filter(lumicycleIdPredicate)
-                .flatMap(lumicycle -> {
-                    LumicycleDirection[] possibleDirections = lumicycle.direction == null ? LumicycleDirection.values() : lumicycle.direction.others();
+            List<List<TronGameAction>> lumicyclesPossibleActions = Stream.of(lumicycles)
+                    .filter(lumicycleIdPredicate)
+                    .map(lumicycle -> {
+                        LumicycleDirection[] possibleDirections = possibleDirections(lumicycle);
+                        return Stream.of(possibleDirections)
+                                .filter(lumicycleDirection -> isAllowed(lumicycle.position.coordinateAt(lumicycleDirection)))
+                                .map(lumicycleDirection -> new TronGameAction(lumicycle.getIndex(), lumicycleDirection))
+                                .collect(Collectors.toList());
+                    })
+                    .collect(Collectors.toList());
 
-                    return Stream.of(possibleDirections)
-                        .filter(lumicycleDirection -> isAllowed(lumicycle.position.coordinateAt(lumicycleDirection)))
-                        .map(lumicycleDirection -> new TronGameAction(lumicycle.getIndex(), lumicycleDirection));
-                })
-                .collect(Collectors.toList());
+
+
+            return collect;
         }
 
         private boolean isAllowed(Coordinate coordinate) {
@@ -427,6 +435,11 @@ class Player {
                         .filter(Objects::nonNull).collect(Collectors.toList());
             }
             return neighbors;
+        }
+
+
+        int distanceTo(Coordinate coordinate) {
+            return Math.abs(x - coordinate.x) + Math.abs(y - coordinate.y);
         }
 
         Coordinate coordinateAt(LumicycleDirection lumicycleDirection) {
