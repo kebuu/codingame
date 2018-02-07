@@ -19,6 +19,7 @@
         <module>descent</module>
         <module>tron</module>
         <module>marslander2</module>
+        <module>binpack</module>
     </modules>
 
     <dependencies>
