@@ -11,13 +11,10 @@ class Player {
 
     static int NB_OF_TRUCK = 100;
     static int TRUCK_MAX_VOLUME = 100;
-    
-    static int NB_OF_INITIAL_SOLUTION = 1;
     static Random RANDOM = new Random(1);
 
     public static void main(String args[]) {
-        System.err.println("Debug messages...");
-        Boxes allBoxes = new Boxes();
+        List<Box> allBoxes = new ArrayList<>();
 
         Scanner in = new Scanner(System.in);
         int boxCount = in.nextInt();
@@ -27,175 +24,221 @@ class Player {
             allBoxes.add(new Box(i, weight, volume));
         }
 
-//        List<Solution> solutions = generateRandomSolutions(NB_OF_INITIAL_SOLUTION, allBoxes, TRUCK_MAX_VOLUME);
-//        Solution solution = solutions.stream().min(Comparator.comparingDouble(s -> s.score(allBoxes))).get();
+        GameParameter gameParameter = new GameParameter();
+        GameContext gameContext = new GameContext(allBoxes);
+
+        ContextualSolution bestSolution = findSolution(gameContext, gameParameter);
 
         // Write an action using System.out.println()
         // To debug: System.err.println("Debug messages...");
 
-        Solution solution = generateRandomSolution(allBoxes, NB_OF_TRUCK);
-
-        Map<Integer, Float> volumeRepartition = solution.getVolumeRepartition(NB_OF_TRUCK, allBoxes);
-        System.err.println(volumeRepartition.toString());
-        System.out.println(solution.print());
+        System.out.println(bestSolution.solution.print());
     }
-    
-    static List<Solution> generateRandomSolutions(int nbOfSolutionToGenerate, Boxes allBoxes, int truckMaxVolume) {
-        List<Solution> generatedSolutions = new ArrayList<>();
-        
-        while(generatedSolutions.size() < nbOfSolutionToGenerate) {
-            Solution solution = generateRandomSolution(allBoxes, NB_OF_TRUCK);
 
-            if(solution.isValid(truckMaxVolume, allBoxes)) {
-                generatedSolutions.add(solution);
+    private static Player.ContextualSolution findSolution(GameContext gameContext, GameParameter gameParameter) {
+        return findSolution(gameContext, gameParameter, System.currentTimeMillis(), null, generateRandomSolutions(gameContext, gameParameter));
+    }
+
+    private static Player.ContextualSolution findSolution(GameContext gameContext, GameParameter gameParameter,
+          long startTime, Player.ContextualSolution currentBestSolution, List<Solution> currentSolutions) {
+
+        List<ContextualSolution> solutionsSortedByScore = currentSolutions.stream()
+                .map(solution -> new Player.ContextualSolution(solution, gameContext))
+                .sorted()
+                .collect(Collectors.toList());
+
+        Player.ContextualSolution bestSolution = solutionsSortedByScore.get(0);
+        if (currentBestSolution != null && bestSolution.score < currentBestSolution.score) {
+            bestSolution = currentBestSolution;
+        }
+
+        if (System.currentTimeMillis() - startTime < gameParameter.maxSearchDuration) {
+            return bestSolution;
+        } else {
+            List<Solution> solutions = crossover(solutionsSortedByScore, gameContext, gameParameter);
+            return findSolution(gameContext, gameParameter, startTime, bestSolution, solutions);
+        }
+    }
+
+    static class GameParameter {
+        int crossOverSelectionRate = 10;
+        int crossOverExchangeRate = 1;
+        int populationSize = 500;
+        long maxSearchDuration = 48000;
+    }
+
+    static class GameContext {
+        final List<Box> boxes;
+        final int nbOfTrucks;
+        final int maxTruckVolume;
+
+        GameContext(List<Box> boxes, int nbOfTrucks, int maxTruckVolume) {
+            this.boxes = boxes;
+            this.nbOfTrucks = nbOfTrucks;
+            this.maxTruckVolume = maxTruckVolume;
+        }
+
+        GameContext(List<Box> boxes) {
+            this(boxes, NB_OF_TRUCK, TRUCK_MAX_VOLUME);
+        }
+    }
+
+    static class ContextualSolution implements Comparable<ContextualSolution> {
+        final Solution solution;
+        final GameContext gameContext;
+
+        final Double score;
+        final Map<Integer, Float> volumeByTruck = new HashMap<>();
+        final Map<Integer, Float> weightByTruck = new HashMap<>();
+
+        ContextualSolution(Solution solution, GameContext gameContext) {
+            this.solution = solution;
+            this.gameContext = gameContext;
+
+            for(int i=0; i < gameContext.nbOfTrucks; i++) {
+                weightByTruck.put(i, 0F);
+                volumeByTruck.put(i, 0F);
+            }
+
+            int[] solutionRepartition = solution.repartition;
+            for(int i = 0; i < solutionRepartition.length; i++) {
+                Box box = gameContext.boxes.get(i);
+
+                Float newTruckWeight = weightByTruck.get(solutionRepartition[i]) + box.weight;
+                weightByTruck.put(solutionRepartition[i], newTruckWeight);
+
+                Float newTruckVolume = volumeByTruck.get(solutionRepartition[i]) + box.volume;
+                volumeByTruck.put(solutionRepartition[i], newTruckVolume);
+            }
+
+            this.score = calculateScore();
+        }
+
+        public int compareTo(ContextualSolution contextualSolution) {
+            return score.compareTo(contextualSolution.score);
+        }
+
+        boolean isValid() {
+            return volumeByTruck.values().stream()
+                .noneMatch(volume -> volume > gameContext.maxTruckVolume);
+        }
+
+        double calculateScore() {
+            DoubleSummaryStatistics weightSummaryStatistics = weightByTruck.values().stream()
+                    .mapToDouble(Float::doubleValue)
+                    .summaryStatistics();
+
+            double score = weightSummaryStatistics.getMax() - weightSummaryStatistics.getMin();
+
+            if(!isValid()) {
+                score += 300d;
+            }
+
+            return score;
+        }
+    }
+
+
+    private static List<Solution> crossover(List<ContextualSolution> sortedSolutions, GameContext gameContext, GameParameter gameParameter) {
+        List<Solution> solutions = new ArrayList<>();
+
+        int selectionPercent = gameParameter.crossOverSelectionRate;
+        int crossOverRate = gameParameter.crossOverExchangeRate;
+
+        List<ContextualSolution> selectedSolutions = sortedSolutions.subList(0, sortedSolutions.size() * selectionPercent / 100);
+
+        while (solutions.size() < gameParameter.populationSize) {
+            ContextualSolution parent1 = selectedSolutions.get(RANDOM.nextInt(selectedSolutions.size()));
+            ContextualSolution parent2 = selectedSolutions.get(RANDOM.nextInt(selectedSolutions.size()));
+
+            int nbOfBoxes = gameContext.boxes.size();
+            int[] child1 = new int[nbOfBoxes];
+            int[] child2 = new int[nbOfBoxes];
+
+            for (int i = 0; i < nbOfBoxes; i++) {
+                int crossover = RANDOM.nextInt(100);
+                if (crossover < crossOverRate) {
+                    child1[i] = parent2.solution.repartition[i];
+                    child2[i] = parent1.solution.repartition[i];
+                } else {
+                    child1[i] = parent1.solution.repartition[i];
+                    child2[i] = parent2.solution.repartition[i];
+                }
             }
         }
-        
+
+        return solutions;
+    }
+
+    static List<Solution> generateRandomSolutions(GameContext gameContext, GameParameter gameParameter) {
+        List<Solution> generatedSolutions = new ArrayList<>();
+
+        while(generatedSolutions.size() < gameParameter.populationSize) {
+            generatedSolutions.add(generateRandomSolution(gameContext));
+        }
+
         return generatedSolutions;
     }
-    
-    static Solution generateRandomSolution(Boxes allBoxes, int nbOfTruck) {
-        int[] repartition = new int[allBoxes.size()];
+
+    static Solution generateRandomSolution(GameContext gameContext) {
+        int[] repartition = new int[gameContext.boxes.size()];
 
         List<Truck> trucks = new ArrayList<>();
-        for(int i = 0; i < nbOfTruck; i++) {
+        for(int i = 0; i < gameContext.nbOfTrucks; i++) {
             trucks.add(new Truck(i));
         }
 
-        List<Box> sortedBoxes = new ArrayList<>(allBoxes.boxes);
-        Collections.sort(sortedBoxes, (o1, o2) -> o1.volume.compareTo(o1.volume));
+        List<Box> sortedBoxes = new ArrayList<>(gameContext.boxes);
+        sortedBoxes.sort((o1, o2) -> o2.volume.compareTo(o1.volume));
 
         for(int i=0; i < sortedBoxes.size(); i++) {
             Box box = sortedBoxes.get(i);
-            Collections.sort(trucks);
-            Truck truck = trucks.get(0);
-            repartition[box.id] = truck.id;
+
+            Truck truck;
+            do {
+                truck = trucks.get(RANDOM.nextInt(gameContext.nbOfTrucks));
+            } while (truck.volume + box.volume > TRUCK_MAX_VOLUME);
+
             truck.addVolume(box.volume);
+            repartition[box.id] = truck.id;
         }
-        
+
         return new Solution(repartition);
     }
 
-    public static class Solution {
-        public final int[] repartition;
-        
-        public Solution(int[] repartition) {
+    static class Solution {
+        final int[] repartition;
+
+        Solution(int[] repartition) {
             this.repartition = repartition;
         }
 
-        public String print() {
+        String print() {
             return IntStream.of(repartition).mapToObj(String::valueOf).collect(Collectors.joining(" "));
         }
-        
-        public boolean isValid(int maxTruckVolume, Boxes allBoxes) {
-            Map<Integer, Float> volumeByTruck = new HashMap<>();
-            
-            for(int i=0; i < NB_OF_TRUCK; i++) {
-                volumeByTruck.put(i, 0F);
-            }
-
-            for(int i = 0; i < repartition.length; i++) {
-                Float newTruckVolume = volumeByTruck.get(repartition[i]) + allBoxes.getBox(i).volume;
-                if (newTruckVolume > maxTruckVolume) {
-                    return false;
-                } else {
-                    volumeByTruck.put(repartition[i], newTruckVolume);
-                }
-            }
-            
-            return true;
-        }
-        
-        public Map<Integer, Float> getWeightRepartition(int nbOfTruck, Boxes allBoxes) {
-            Map<Integer, Float> weightByTruck = new HashMap<>();
-            
-            for(int i=0; i < nbOfTruck; i++) {
-                weightByTruck.put(i, 0F);
-            }
-            
-            for(int i = 0; i < repartition.length; i++) {
-                Float newTruckWeight = weightByTruck.get(repartition[i]) + allBoxes.getBox(i).weight;
-                weightByTruck.put(repartition[i], newTruckWeight);
-            }
-            
-            return weightByTruck;
-        }
-
-        public Map<Integer, Float> getVolumeRepartition(int nbOfTruck, Boxes allBoxes) {
-            Map<Integer, Float> volumeByTruck = new HashMap<>();
-
-            for(int i=0; i < nbOfTruck; i++) {
-                volumeByTruck.put(i, 0F);
-            }
-
-            for(int i = 0; i < repartition.length; i++) {
-                Float newTruckVolume = volumeByTruck.get(repartition[i]) + allBoxes.getBox(i).volume;
-                volumeByTruck.put(repartition[i], newTruckVolume);
-            }
-
-            return volumeByTruck;
-        }
-        
-        public Float score(Boxes allBoxes) {
-            Map<Integer, Float> weightByTruck = getWeightRepartition(3, allBoxes);
-            
-            Float minWeight = null;
-            Float maxWeight = null;
-            
-            for(Map.Entry<Integer, Float> weightByTruckEntry : weightByTruck.entrySet()) {
-                Float weight = weightByTruckEntry.getValue();
-                
-                if(minWeight ==  null) {
-                    minWeight = weightByTruckEntry.getValue();
-                    maxWeight = weightByTruckEntry.getValue();
-                } else if (weight < minWeight) {
-                    minWeight = weight;
-                } else if (weight > maxWeight) {
-                    maxWeight = weight;
-                }
-            }
-
-            return maxWeight - minWeight;
-        }       
     }
-    
-    public static class Boxes {
-        public final List<Box> boxes = new ArrayList<>();
-        
-        public void add(Box box) {
-            boxes.add(box);
-        }
-        
-        public int size() {
-            return boxes.size();
-        }
-        
-        public Box getBox(int i) {
-            return boxes.get(i);
-        }
-    }
-    
-    public static class Box {
-        public final int id;
-        public final Float weight;
-        public final Float volume;
-        
-        public Box(int id, float weight, float volume) {
+
+    static class Box {
+        final int id;
+        final Float weight;
+        final Float volume;
+
+        Box(int id, float weight, float volume) {
             this.id = id;
             this.weight = weight;
             this.volume = volume;
         }
     }
 
-    public static class Truck implements Comparable<Truck>{
-        public final Integer id;
-        public Float volume = 0F;
+    static class Truck implements Comparable<Truck>{
+        final Integer id;
+        Float volume = 0F;
 
-        public Truck(int id) {
+        Truck(int id) {
             this.id = id;
         }
 
-        public Truck addVolume(float volume) {
+        Truck addVolume(float volume) {
             this.volume += volume;
             return this;
         }
@@ -221,15 +264,15 @@ class Player {
 
     private static void log(Supplier<Object>... logs) {
         System.err.println(
-            Arrays.asList(logs).stream()
-                .map(Supplier::get)
-                .map(o -> {
-                    if (o != null && o.getClass().isArray()) {
-                        return Arrays.asList(o).toString();
-                    } else {
-                        return Objects.toString(o);
-                    }
-                })
-                .collect(Collectors.joining(", ")));
+                Arrays.stream(logs)
+                        .map(Supplier::get)
+                        .map(o -> {
+                            if (o != null && o.getClass().isArray()) {
+                                return Collections.singletonList(o).toString();
+                            } else {
+                                return Objects.toString(o);
+                            }
+                        })
+                        .collect(Collectors.joining(", ")));
     }
 }
