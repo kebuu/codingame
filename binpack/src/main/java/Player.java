@@ -12,6 +12,7 @@ class Player {
     static int NB_OF_TRUCK = 100;
     static int TRUCK_MAX_VOLUME = 100;
     static Random RANDOM = new Random(1);
+    static GameStatistic gameStatistics = new GameStatistic();
 
     public static void main(String args[]) {
         List<Box> allBoxes = new ArrayList<>();
@@ -24,10 +25,10 @@ class Player {
             allBoxes.add(new Box(i, weight, volume));
         }
 
-        GameParameter gameParameter = new GameParameter();
+        GameParameters gameParameters = new GameParameters();
         GameContext gameContext = new GameContext(allBoxes);
 
-        ContextualSolution bestSolution = findSolution(gameContext, gameParameter);
+        ContextualSolution bestSolution = findSolution(gameContext, gameParameters);
 
         // Write an action using System.out.println()
         // To debug: System.err.println("Debug messages...");
@@ -35,38 +36,86 @@ class Player {
         System.out.println(bestSolution.solution.print());
     }
 
-    private static Player.ContextualSolution findSolution(GameContext gameContext, GameParameter gameParameter) {
-        return findSolution(gameContext, gameParameter, System.currentTimeMillis(), null, generateRandomSolutions(gameContext, gameParameter));
+    static Player.ContextualSolution findSolution(GameContext gameContext, GameParameters gameParameters) {
+        log(() ->"Finding solution with parameters : " + gameParameters);
+        ContextualSolution solution = findSolution(gameContext, gameParameters, System.currentTimeMillis(), generateRandomSolutions(gameContext, gameParameters));
+
+        log(() -> gameStatistics.toString());
+        return solution;
     }
 
-    private static Player.ContextualSolution findSolution(GameContext gameContext, GameParameter gameParameter,
-          long startTime, Player.ContextualSolution currentBestSolution, List<Solution> currentSolutions) {
+    private static Player.ContextualSolution findSolution(GameContext gameContext, GameParameters gameParameters,
+          long startTime, List<Solution> initialSolutions) {
 
-        List<ContextualSolution> solutionsSortedByScore = currentSolutions.stream()
-                .map(solution -> new Player.ContextualSolution(solution, gameContext))
-                .sorted()
-                .collect(Collectors.toList());
+        Player.ContextualSolution bestSolution = null;
+        List<Solution> solutions = initialSolutions;
 
-        Player.ContextualSolution bestSolution = solutionsSortedByScore.get(0);
-        if (currentBestSolution != null && bestSolution.score < currentBestSolution.score) {
-            bestSolution = currentBestSolution;
+        while (System.currentTimeMillis() - startTime < gameParameters.maxSearchDuration) {
+            List<ContextualSolution> solutionsSortedByScore = solutions.stream()
+                    .map(solution -> new Player.ContextualSolution(solution, gameContext, gameParameters))
+                    .sorted()
+                    .collect(Collectors.toList());
+
+            log(() -> "Average score : " + solutionsSortedByScore.stream().mapToDouble(solution -> solution.score).average().getAsDouble());
+
+            Player.ContextualSolution newBestSolution = solutionsSortedByScore.get(0);
+            if (bestSolution == null || newBestSolution.score < bestSolution.score) { // lower is better
+                bestSolution = newBestSolution;
+            }
+
+            Player.ContextualSolution finalBestSolution = bestSolution;
+            log(() -> "Best score : " + finalBestSolution.score);
+            log(() -> "InvalidSolutionRate : " + gameStatistics.getInvalidSolutionRate());
+            gameStatistics.reset();
+
+            solutions = crossover(solutionsSortedByScore, gameContext, gameParameters);
         }
 
-        if (System.currentTimeMillis() - startTime < gameParameter.maxSearchDuration) {
-            return bestSolution;
-        } else {
-            List<Solution> solutions = crossover(solutionsSortedByScore, gameContext, gameParameter);
-            return findSolution(gameContext, gameParameter, startTime, bestSolution, solutions);
-        }
+        return bestSolution;
     }
 
-    static class GameParameter {
-        int crossOverSelectionRate = 10;
+    static class GameParameters {
+        int crossOverSelectionCount = 100;
         int crossOverExchangeRate = 1;
         int populationSize = 500;
         long maxSearchDuration = 48000;
-    }
+        double invalidSolutionPenalty = 300d;
+        int mutationRate = 0;
 
+        @Override
+        public String toString() {
+            return "GameParameters{" +
+                    ", crossOverSelectionCount=" + crossOverSelectionCount +
+                    ", crossOverExchangeRate=" + crossOverExchangeRate +
+                    ", populationSize=" + populationSize +
+                    ", maxSearchDuration=" + maxSearchDuration +
+                    ", invalidSolutionPenalty=" + invalidSolutionPenalty +
+                    '}';
+        }
+    }
+    static class GameStatistic {
+        int scoredSolutionCount;
+        int invalidSolutionCount;
+        LongSummaryStatistics crossoverTime = new LongSummaryStatistics();
+
+        @Override
+        public String toString() {
+            return "GameStatistics{" +
+                    "invalidSolutionRate=" + getInvalidSolutionRate() +
+                    ",crossover mean duration=" + crossoverTime.getAverage() +
+                    ",crossover occurrence=" + crossoverTime.getCount() +
+                    '}';
+        }
+
+        private int getInvalidSolutionRate() {
+            return scoredSolutionCount== 0 ? -1 : 100 * invalidSolutionCount / scoredSolutionCount;
+        }
+
+        public void reset() {
+            invalidSolutionCount = 0;
+            scoredSolutionCount = 0;
+        }
+    }
     static class GameContext {
         final List<Box> boxes;
         final int nbOfTrucks;
@@ -86,14 +135,16 @@ class Player {
     static class ContextualSolution implements Comparable<ContextualSolution> {
         final Solution solution;
         final GameContext gameContext;
+        final GameParameters gameParameters;
 
         final Double score;
         final Map<Integer, Float> volumeByTruck = new HashMap<>();
         final Map<Integer, Float> weightByTruck = new HashMap<>();
 
-        ContextualSolution(Solution solution, GameContext gameContext) {
+        ContextualSolution(Solution solution, GameContext gameContext, GameParameters gameParameters) {
             this.solution = solution;
             this.gameContext = gameContext;
+            this.gameParameters = gameParameters;
 
             for(int i=0; i < gameContext.nbOfTrucks; i++) {
                 weightByTruck.put(i, 0F);
@@ -130,50 +181,98 @@ class Player {
 
             double score = weightSummaryStatistics.getMax() - weightSummaryStatistics.getMin();
 
+            gameStatistics.scoredSolutionCount++;
             if(!isValid()) {
-                score += 300d;
+                score += gameParameters.invalidSolutionPenalty;
+                gameStatistics.invalidSolutionCount++;
             }
 
             return score;
         }
+
+        @Override
+        public boolean equals(Object obj) {
+            return Arrays.equals(solution.repartition, ((ContextualSolution)obj).solution.repartition);
+        }
+
+        @Override
+        public int hashCode() {
+            return solution.repartition[0];
+        }
     }
 
-
-    private static List<Solution> crossover(List<ContextualSolution> sortedSolutions, GameContext gameContext, GameParameter gameParameter) {
+    static List<Solution> crossover(List<ContextualSolution> sortedSolutions, GameContext gameContext, GameParameters gameParameters) {
+        long startCrossoverTime = System.currentTimeMillis();
         List<Solution> solutions = new ArrayList<>();
 
-        int selectionPercent = gameParameter.crossOverSelectionRate;
-        int crossOverRate = gameParameter.crossOverExchangeRate;
+        int selectionCount = gameParameters.crossOverSelectionCount;
+        int crossOverRate = gameParameters.crossOverExchangeRate;
+        int mutationRate = gameParameters.mutationRate;
 
-        List<ContextualSolution> selectedSolutions = sortedSolutions.subList(0, sortedSolutions.size() * selectionPercent / 100);
+        List<ContextualSolution> selectedValidSolutions = sortedSolutions.stream()
+                .filter(ContextualSolution::isValid)
+                .collect(Collectors.toList());
 
-        while (solutions.size() < gameParameter.populationSize) {
-            ContextualSolution parent1 = selectedSolutions.get(RANDOM.nextInt(selectedSolutions.size()));
-            ContextualSolution parent2 = selectedSolutions.get(RANDOM.nextInt(selectedSolutions.size()));
+        log(() -> "Valid solution count : " + selectedValidSolutions.size() + " sur " + sortedSolutions.size());
 
-            int nbOfBoxes = gameContext.boxes.size();
-            int[] child1 = new int[nbOfBoxes];
-            int[] child2 = new int[nbOfBoxes];
+        List<ContextualSolution> selectedSolutions = selectedValidSolutions.stream()
+                .distinct()
+                .collect(Collectors.toList());
 
-            for (int i = 0; i < nbOfBoxes; i++) {
-                int crossover = RANDOM.nextInt(100);
-                if (crossover < crossOverRate) {
-                    child1[i] = parent2.solution.repartition[i];
-                    child2[i] = parent1.solution.repartition[i];
-                } else {
-                    child1[i] = parent1.solution.repartition[i];
-                    child2[i] = parent2.solution.repartition[i];
+        log(() -> "distinct solution count : " + selectedSolutions.size() + " sur " + selectedValidSolutions.size());
+
+        List<ContextualSolution> limitedSelectedSolutions = selectedSolutions.stream()
+                .limit(selectionCount)
+                .collect(Collectors.toList());
+
+        log(() -> "limited solution count : " + limitedSelectedSolutions.size());
+
+        while (solutions.size() < gameParameters.populationSize) {
+            ContextualSolution parent1 = limitedSelectedSolutions.get(RANDOM.nextInt(limitedSelectedSolutions.size()));
+            ContextualSolution parent2 = limitedSelectedSolutions.get(RANDOM.nextInt(limitedSelectedSolutions.size()));
+
+            if (!parent1.equals(parent2)) {
+                int nbOfBoxes = gameContext.boxes.size();
+
+                int[] child1 = new int[nbOfBoxes];
+                int[] child2 = new int[nbOfBoxes];
+
+                for (int i = 0; i < nbOfBoxes; i++) {
+                    int crossoverProbability = RANDOM.nextInt(100);
+
+                    if (crossoverProbability < crossOverRate) {
+                        child1[i] = parent2.solution.repartition[i];
+                        child2[i] = parent1.solution.repartition[i];
+                    } else {
+                        child1[i] = parent1.solution.repartition[i];
+                        child2[i] = parent2.solution.repartition[i];
+                    }
+
+                    int mutation = RANDOM.nextInt(100);
+                    if (mutation < mutationRate) {
+                        int geneSwitch1 = RANDOM.nextInt(nbOfBoxes);
+                        int geneSwitch2 = RANDOM.nextInt(nbOfBoxes);
+                        int savedGene1Value = child1[geneSwitch1];
+                        child1[geneSwitch1] = child1[geneSwitch2];
+                        child1[geneSwitch2] = savedGene1Value;
+                    }
                 }
+
+                solutions.add(new Solution(child1));
+                solutions.add(new Solution(child2));
             }
         }
 
+        gameStatistics.crossoverTime.accept(System.currentTimeMillis() - startCrossoverTime);
+
+        log(() -> "Crossover iteration:" + gameStatistics.crossoverTime.getCount());
         return solutions;
     }
 
-    static List<Solution> generateRandomSolutions(GameContext gameContext, GameParameter gameParameter) {
+    static List<Solution> generateRandomSolutions(GameContext gameContext, GameParameters gameParameters) {
         List<Solution> generatedSolutions = new ArrayList<>();
 
-        while(generatedSolutions.size() < gameParameter.populationSize) {
+        while(generatedSolutions.size() < gameParameters.populationSize) {
             generatedSolutions.add(generateRandomSolution(gameContext));
         }
 
@@ -189,7 +288,7 @@ class Player {
         }
 
         List<Box> sortedBoxes = new ArrayList<>(gameContext.boxes);
-        sortedBoxes.sort((o1, o2) -> o2.volume.compareTo(o1.volume));
+        sortedBoxes.sort((box1, box2) -> box2.volume.compareTo(box1.volume));
 
         for(int i=0; i < sortedBoxes.size(); i++) {
             Box box = sortedBoxes.get(i);
@@ -197,9 +296,12 @@ class Player {
             Truck truck;
             do {
                 truck = trucks.get(RANDOM.nextInt(gameContext.nbOfTrucks));
-            } while (truck.volume + box.volume > TRUCK_MAX_VOLUME);
+            } while (truck.volume + box.volume > gameContext.maxTruckVolume);
 
             truck.addVolume(box.volume);
+            if (truck.volume > gameContext.maxTruckVolume) {
+                System.out.println("failed");
+            }
             repartition[box.id] = truck.id;
         }
 
@@ -228,9 +330,14 @@ class Player {
             this.weight = weight;
             this.volume = volume;
         }
+
+        @Override
+        public String toString() {
+            return weight + " " + volume;
+        }
     }
 
-    static class Truck implements Comparable<Truck>{
+    static class Truck {
         final Integer id;
         Float volume = 0F;
 
@@ -241,16 +348,6 @@ class Player {
         Truck addVolume(float volume) {
             this.volume += volume;
             return this;
-        }
-
-        @Override
-        public int compareTo(Truck o) {
-            int compareTo = volume.compareTo(o.volume);
-            if (compareTo == 0) {
-                return id.compareTo(o.id);
-            } else {
-                return compareTo;
-            }
         }
 
         @Override
