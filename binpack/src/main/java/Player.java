@@ -51,6 +51,7 @@ class Player {
         List<Solution> solutions = initialSolutions;
 
         while (System.currentTimeMillis() - startTime < gameParameters.maxSearchDuration) {
+            log(() -> ">>> Elapsed time: " + (System.currentTimeMillis() - startTime));
             List<ContextualSolution> solutionsSortedByScore = solutions.stream()
                     .map(solution -> new Player.ContextualSolution(solution, gameContext, gameParameters))
                     .sorted()
@@ -64,7 +65,7 @@ class Player {
             }
 
             Player.ContextualSolution finalBestSolution = bestSolution;
-            log(() -> "Best score : " + finalBestSolution.score);
+            log(() -> "Best score : " + finalBestSolution.score + " (real: " + finalBestSolution.realScore + ")");
             log(() -> "InvalidSolutionRate : " + gameStatistics.getInvalidSolutionRate());
             gameStatistics.reset();
 
@@ -118,6 +119,7 @@ class Player {
     }
     static class GameContext {
         final List<Box> boxes;
+        final List<Box> boxesSortedByWeight;
         final int nbOfTrucks;
         final int maxTruckVolume;
 
@@ -125,11 +127,13 @@ class Player {
             this.boxes = boxes;
             this.nbOfTrucks = nbOfTrucks;
             this.maxTruckVolume = maxTruckVolume;
+            this.boxesSortedByWeight = boxes.stream().sorted(Comparator.comparingDouble(box -> box.weight.doubleValue())).collect(Collectors.toList());
         }
 
         GameContext(List<Box> boxes) {
             this(boxes, NB_OF_TRUCK, TRUCK_MAX_VOLUME);
         }
+
     }
 
     static class ContextualSolution implements Comparable<ContextualSolution> {
@@ -138,8 +142,10 @@ class Player {
         final GameParameters gameParameters;
 
         final Double score;
+        Double realScore;
         final Map<Integer, Float> volumeByTruck = new HashMap<>();
         final Map<Integer, Float> weightByTruck = new HashMap<>();
+        Boolean isValid;
 
         ContextualSolution(Solution solution, GameContext gameContext, GameParameters gameParameters) {
             this.solution = solution;
@@ -170,24 +176,15 @@ class Player {
         }
 
         boolean isValid() {
-            return volumeByTruck.values().stream()
-                .noneMatch(volume -> volume > gameContext.maxTruckVolume);
+            return true;
         }
 
         double calculateScore() {
-            DoubleSummaryStatistics weightSummaryStatistics = weightByTruck.values().stream()
-                    .mapToDouble(Float::doubleValue)
-                    .summaryStatistics();
+            DoubleSummaryStatistics doubleSummaryStatistics = weightByTruck.values().stream().mapToDouble(Float::doubleValue).summaryStatistics();
+            realScore = doubleSummaryStatistics.getMax() - doubleSummaryStatistics.getMin();
 
-            double score = weightSummaryStatistics.getMax() - weightSummaryStatistics.getMin();
-
-            gameStatistics.scoredSolutionCount++;
-            if(!isValid()) {
-                score += gameParameters.invalidSolutionPenalty;
-                gameStatistics.invalidSolutionCount++;
-            }
-
-            return score;
+            double[] weightsAsDouble = weightByTruck.values().stream().mapToDouble(Float::doubleValue).toArray();
+            return new Statistics(weightsAsDouble).getVariance();
         }
 
         @Override
@@ -227,6 +224,8 @@ class Player {
 
         log(() -> "limited solution count : " + limitedSelectedSolutions.size());
 
+        solutions.addAll(limitedSelectedSolutions.stream().map(contextualSolution -> contextualSolution.solution).collect(Collectors.toList()));
+
         while (solutions.size() < gameParameters.populationSize) {
             ContextualSolution parent1 = limitedSelectedSolutions.get(RANDOM.nextInt(limitedSelectedSolutions.size()));
             ContextualSolution parent2 = limitedSelectedSolutions.get(RANDOM.nextInt(limitedSelectedSolutions.size()));
@@ -238,24 +237,30 @@ class Player {
                 int[] child2 = new int[nbOfBoxes];
 
                 for (int i = 0; i < nbOfBoxes; i++) {
-                    int crossoverProbability = RANDOM.nextInt(100);
+                    int crossoverGene = RANDOM.nextInt(1000);
 
-                    if (crossoverProbability < crossOverRate) {
-                        child1[i] = parent2.solution.repartition[i];
-                        child2[i] = parent1.solution.repartition[i];
-                    } else {
+                    if (crossoverGene <= crossOverRate) {
                         child1[i] = parent1.solution.repartition[i];
                         child2[i] = parent2.solution.repartition[i];
+                    } else {
+                        child1[i] = parent2.solution.repartition[i];
+                        child2[i] = parent1.solution.repartition[i];
                     }
+                }
 
-                    int mutation = RANDOM.nextInt(100);
-                    if (mutation < mutationRate) {
-                        int geneSwitch1 = RANDOM.nextInt(nbOfBoxes);
-                        int geneSwitch2 = RANDOM.nextInt(nbOfBoxes);
-                        int savedGene1Value = child1[geneSwitch1];
-                        child1[geneSwitch1] = child1[geneSwitch2];
-                        child1[geneSwitch2] = savedGene1Value;
-                    }
+                int mutation = RANDOM.nextInt(100);
+                if (mutation < mutationRate) {
+                    int geneSwitch1 = RANDOM.nextInt(nbOfBoxes);
+                    int geneSwitch2 = RANDOM.nextInt(nbOfBoxes);
+
+                    int savedGene1ValueChild1 = child1[geneSwitch1];
+                    child1[geneSwitch1] = child1[geneSwitch2];
+                    child1[geneSwitch2] = savedGene1ValueChild1;
+
+
+                    int savedGene1ValueChild2 = child2[geneSwitch1];
+                    child2[geneSwitch1] = child2[geneSwitch2];
+                    child2[geneSwitch2] = savedGene1ValueChild2;
                 }
 
                 solutions.add(new Solution(child1));
@@ -320,6 +325,27 @@ class Player {
         }
     }
 
+    static int selectRandomBoxIndexByWeight(GameContext gameContext) {
+        List<Box> boxesSortedByWeight = gameContext.boxesSortedByWeight;
+
+        List<Double> boxSelectionStrength = boxesSortedByWeight.stream().map(box -> Math.sqrt(box.weight)).collect(Collectors.toList());
+
+        double boxStrengthSum = boxSelectionStrength.stream().mapToDouble(myDouble -> myDouble).sum();
+
+        double randomSelector = RANDOM.nextDouble() * boxStrengthSum;
+
+        double runningStrengthSum = 0d;
+        for (int i = 0; i < boxesSortedByWeight.size(); i++) {
+            runningStrengthSum += boxSelectionStrength.get(i);
+
+            if (runningStrengthSum >= randomSelector) {
+                return boxesSortedByWeight.get(i).id;
+            }
+        }
+
+        throw new IllegalStateException();
+    }
+
     static class Box {
         final int id;
         final Float weight;
@@ -371,5 +397,43 @@ class Player {
                             }
                         })
                         .collect(Collectors.joining(", ")));
+    }
+
+    public static class Statistics {
+        double[] data;
+        int size;
+
+        public Statistics(double[] data) {
+            this.data = data;
+            size = data.length;
+        }
+
+        double getMean() {
+            double sum = 0.0;
+            for(double a : data)
+                sum += a;
+            return sum/size;
+        }
+
+        double getVariance() {
+            double mean = getMean();
+            double temp = 0;
+            for(double a :data)
+                temp += (a-mean)*(a-mean);
+            return temp/(size-1);
+        }
+
+        double getStdDev() {
+            return Math.sqrt(getVariance());
+        }
+
+        public double median() {
+            Arrays.sort(data);
+
+            if (data.length % 2 == 0) {
+                return (data[(data.length / 2) - 1] + data[data.length / 2]) / 2.0;
+            }
+            return data[data.length / 2];
+        }
     }
 }
