@@ -1,6 +1,6 @@
 import java.util.*;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 
 /**
@@ -9,10 +9,8 @@ import java.util.stream.IntStream;
  **/
 class Player {
 
-    static int NB_OF_TRUCK = 100;
-    static int TRUCK_MAX_VOLUME = 100;
-    static Random RANDOM = new Random(1);
-    static GameStatistic gameStatistics = new GameStatistic();
+    static Random randomGenerator = new Random(1);
+    static Statistic stats = new Statistic();
 
     public static void main(String args[]) {
         List<Box> allBoxes = new ArrayList<>();
@@ -20,338 +18,316 @@ class Player {
         Scanner in = new Scanner(System.in);
         int boxCount = in.nextInt();
         for (int i = 0; i < boxCount; i++) {
-            float weight = in.nextFloat();
-            float volume = in.nextFloat();
+            double weight = in.nextDouble();
+            double volume = in.nextDouble();
             allBoxes.add(new Box(i, weight, volume));
         }
 
-        GameParameters gameParameters = new GameParameters();
-        GameContext gameContext = new GameContext(allBoxes);
+        Params params = new Params();
+        params.boxes = allBoxes;
+        params.nbOfGroup = 5;
+        params.populationSize = 1000;
+        params.bestSolutionSelectionCount = 30;
+        params.executionMaxTime = 48000;
+        params.startTime = System.currentTimeMillis();
 
-        ContextualSolution bestSolution = findSolution(gameContext, gameParameters);
-
-        // Write an action using System.out.println()
-        // To debug: System.err.println("Debug messages...");
-
-        System.out.println(bestSolution.solution.print());
+        int[] codinGameSolution = play(params);
+        System.out.println(IntStream.of(codinGameSolution).mapToObj(String::valueOf).collect(Collectors.joining(" ")));
     }
 
-    static Player.ContextualSolution findSolution(GameContext gameContext, GameParameters gameParameters) {
-        log(() ->"Finding solution with parameters : " + gameParameters);
-        ContextualSolution solution = findSolution(gameContext, gameParameters, System.currentTimeMillis(), generateRandomSolutions(gameContext, gameParameters));
+    static int[] play(Player.Params params) {
+        // Initialisation des premieres solutions
+        double[][] currentProbabilities = getInitialProbabilities(params);
+        //List<int[]> currentSolutions = generateSolutions(currentProbabilities, params);
+        List<int[]> currentSolutions = generateInitialSolutions(params);
 
-        log(() -> gameStatistics.toString());
-        return solution;
-    }
+        // Initialisation du meilleur resultat...
+        Player.ScoredGroupedSolution bestSolutionEver = null;
 
-    private static Player.ContextualSolution findSolution(GameContext gameContext, GameParameters gameParameters,
-          long startTime, List<Solution> initialSolutions) {
+        int iterationCount = 0;
+        while (System.currentTimeMillis() - params.startTime < params.executionMaxTime  && iterationCount < params.executionMaxIteration) {
+            System.err.println(System.currentTimeMillis() - params.startTime + ". Iteration : " + iterationCount++);
+            debug(currentProbabilities, params);
 
-        Player.ContextualSolution bestSolution = null;
-        List<Solution> solutions = initialSolutions;
-
-        while (System.currentTimeMillis() - startTime < gameParameters.maxSearchDuration) {
-            log(() -> ">>> Elapsed time: " + (System.currentTimeMillis() - startTime));
-            List<ContextualSolution> solutionsSortedByScore = solutions.stream()
-                    .map(solution -> new Player.ContextualSolution(solution, gameContext, gameParameters))
-                    .sorted()
+            // Calcul du score de chaque solution et reorganisation des solutions en groupe
+            List<ScoredGroupedSolution> scoredGroupedSolutions = new ArrayList<>();
+            for (int[] solution : currentSolutions) {
+                Map<Integer, List<Integer>> organizedSolution = organizedSolution(solution, params);
+                double score = score(organizedSolution, params);
+                scoredGroupedSolutions.add(new Player.ScoredGroupedSolution(score, organizedSolution, solution));
+            }
+            debug(scoredGroupedSolutions, params);
+            List<ScoredGroupedSolution> validDistinctSolution = scoredGroupedSolutions.stream()
+                    .filter(scoredGroupedSolution -> scoredGroupedSolution.isValid)
+                    .distinct()
                     .collect(Collectors.toList());
 
-            log(() -> "Average score : " + solutionsSortedByScore.stream().mapToDouble(solution -> solution.score).average().getAsDouble());
+            // Selection des meilleurs solutions
+            Collections.sort(scoredGroupedSolutions);
+            int selectionSize = Math.min(scoredGroupedSolutions.size(), params.bestSolutionSelectionCount);
+            List<ScoredGroupedSolution> bestScoredGroupedSolution = scoredGroupedSolutions.subList(0, selectionSize);
 
-            Player.ContextualSolution newBestSolution = solutionsSortedByScore.get(0);
-            if (bestSolution == null || newBestSolution.score < bestSolution.score) { // lower is better
-                bestSolution = newBestSolution;
+            List<int[]> bestSolutions = new ArrayList<>();
+            for (Player.ScoredGroupedSolution scoredGroupedSolution : bestScoredGroupedSolution) {
+                bestSolutions.add(scoredGroupedSolution.solution);
             }
+            debug(bestScoredGroupedSolution, params);
 
-            Player.ContextualSolution finalBestSolution = bestSolution;
-            log(() -> "Best score : " + finalBestSolution.score + " (real: " + finalBestSolution.realScore + ")");
-            log(() -> "InvalidSolutionRate : " + gameStatistics.getInvalidSolutionRate());
-            gameStatistics.reset();
+            // Generation de la prochaine generation a partir des meilleurs solutions de la population courante
+            currentProbabilities = extractProbability(bestSolutions, params);
+            currentSolutions = generateSolutions(currentProbabilities, params);
+            //currentSolutions.addAll(bestSolutions);
 
-            solutions = crossover(solutionsSortedByScore, gameContext, gameParameters);
-        }
-
-        return bestSolution;
-    }
-
-    static class GameParameters {
-        int crossOverSelectionCount = 100;
-        int crossOverExchangeRate = 1;
-        int populationSize = 500;
-        long maxSearchDuration = 48000;
-        double invalidSolutionPenalty = 300d;
-        int mutationRate = 0;
-
-        @Override
-        public String toString() {
-            return "GameParameters{" +
-                    ", crossOverSelectionCount=" + crossOverSelectionCount +
-                    ", crossOverExchangeRate=" + crossOverExchangeRate +
-                    ", populationSize=" + populationSize +
-                    ", maxSearchDuration=" + maxSearchDuration +
-                    ", invalidSolutionPenalty=" + invalidSolutionPenalty +
-                    '}';
-        }
-    }
-    static class GameStatistic {
-        int scoredSolutionCount;
-        int invalidSolutionCount;
-        LongSummaryStatistics crossoverTime = new LongSummaryStatistics();
-
-        @Override
-        public String toString() {
-            return "GameStatistics{" +
-                    "invalidSolutionRate=" + getInvalidSolutionRate() +
-                    ",crossover mean duration=" + crossoverTime.getAverage() +
-                    ",crossover occurrence=" + crossoverTime.getCount() +
-                    '}';
-        }
-
-        private int getInvalidSolutionRate() {
-            return scoredSolutionCount== 0 ? -1 : 100 * invalidSolutionCount / scoredSolutionCount;
-        }
-
-        public void reset() {
-            invalidSolutionCount = 0;
-            scoredSolutionCount = 0;
-        }
-    }
-    static class GameContext {
-        final List<Box> boxes;
-        final List<Box> boxesSortedByWeight;
-        final int nbOfTrucks;
-        final int maxTruckVolume;
-
-        GameContext(List<Box> boxes, int nbOfTrucks, int maxTruckVolume) {
-            this.boxes = boxes;
-            this.nbOfTrucks = nbOfTrucks;
-            this.maxTruckVolume = maxTruckVolume;
-            this.boxesSortedByWeight = boxes.stream().sorted(Comparator.comparingDouble(box -> box.weight.doubleValue())).collect(Collectors.toList());
-        }
-
-        GameContext(List<Box> boxes) {
-            this(boxes, NB_OF_TRUCK, TRUCK_MAX_VOLUME);
-        }
-
-    }
-
-    static class ContextualSolution implements Comparable<ContextualSolution> {
-        final Solution solution;
-        final GameContext gameContext;
-        final GameParameters gameParameters;
-
-        final Double score;
-        Double realScore;
-        final Map<Integer, Float> volumeByTruck = new HashMap<>();
-        final Map<Integer, Float> weightByTruck = new HashMap<>();
-        Boolean isValid;
-
-        ContextualSolution(Solution solution, GameContext gameContext, GameParameters gameParameters) {
-            this.solution = solution;
-            this.gameContext = gameContext;
-            this.gameParameters = gameParameters;
-
-            for(int i=0; i < gameContext.nbOfTrucks; i++) {
-                weightByTruck.put(i, 0F);
-                volumeByTruck.put(i, 0F);
+            // Recuperation de la meilleur solution connue
+            Player.ScoredGroupedSolution bestSolutionInCurrentPopulation = scoredGroupedSolutions.get(0);
+            if (bestSolutionEver == null || bestSolutionEver.score > bestSolutionInCurrentPopulation.score) {
+                bestSolutionEver = bestSolutionInCurrentPopulation;
+                System.err.println("Best solution score : " + bestSolutionEver);
+            } else {
+                System.err.println("Best solution in current population : " + bestSolutionInCurrentPopulation);
             }
-
-            int[] solutionRepartition = solution.repartition;
-            for(int i = 0; i < solutionRepartition.length; i++) {
-                Box box = gameContext.boxes.get(i);
-
-                Float newTruckWeight = weightByTruck.get(solutionRepartition[i]) + box.weight;
-                weightByTruck.put(solutionRepartition[i], newTruckWeight);
-
-                Float newTruckVolume = volumeByTruck.get(solutionRepartition[i]) + box.volume;
-                volumeByTruck.put(solutionRepartition[i], newTruckVolume);
-            }
-
-            this.score = calculateScore();
         }
 
-        public int compareTo(ContextualSolution contextualSolution) {
-            return score.compareTo(contextualSolution.score);
-        }
-
-        boolean isValid() {
-            return true;
-        }
-
-        double calculateScore() {
-            DoubleSummaryStatistics doubleSummaryStatistics = weightByTruck.values().stream().mapToDouble(Float::doubleValue).summaryStatistics();
-            realScore = doubleSummaryStatistics.getMax() - doubleSummaryStatistics.getMin();
-
-            double[] weightsAsDouble = weightByTruck.values().stream().mapToDouble(Float::doubleValue).toArray();
-            return new Statistics(weightsAsDouble).getVariance();
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            return Arrays.equals(solution.repartition, ((ContextualSolution)obj).solution.repartition);
-        }
-
-        @Override
-        public int hashCode() {
-            return solution.repartition[0];
-        }
+        // Ecriture de la solution au format attendu
+        return toCodinGameSolution(bestSolutionEver.organizedSolution, params);
     }
 
-    static List<Solution> crossover(List<ContextualSolution> sortedSolutions, GameContext gameContext, GameParameters gameParameters) {
-        long startCrossoverTime = System.currentTimeMillis();
-        List<Solution> solutions = new ArrayList<>();
+    static List<int[]> generateInitialSolutions(Params params) {
+        List<int[]> solutions = new ArrayList<>();
 
-        int selectionCount = gameParameters.crossOverSelectionCount;
-        int crossOverRate = gameParameters.crossOverExchangeRate;
-        int mutationRate = gameParameters.mutationRate;
+        List<Box> sortedBoxes = params.boxes;//.stream().sorted((b1, b2) -> Double.compare(b2.volume, b1.volume)).collect(Collectors.toList());
 
-        List<ContextualSolution> selectedValidSolutions = sortedSolutions.stream()
-                .filter(ContextualSolution::isValid)
-                .collect(Collectors.toList());
+        for (int i = 0; i < params.populationSize; i++) {
+            Map<Integer, Double> volumeByGroup = new HashMap<>();
+            Map<Integer, SortedSet<Integer>> contentByGroup = new HashMap<>();
 
-        log(() -> "Valid solution count : " + selectedValidSolutions.size() + " sur " + sortedSolutions.size());
+            for (int j = 0; j < sortedBoxes.size(); j++) {
+                Box sortedBox = sortedBoxes.get(j);
 
-        List<ContextualSolution> selectedSolutions = selectedValidSolutions.stream()
-                .distinct()
-                .collect(Collectors.toList());
+                boolean boxAffected = false;
+                do {
+                    int randomGroup = randomGenerator.nextInt(params.nbOfGroup);
+                    Double groupVolume = volumeByGroup.computeIfAbsent(randomGroup, k -> 0.);
+                    double maybeNewVolumeOfGroup = groupVolume + sortedBox.volume;
 
-        log(() -> "distinct solution count : " + selectedSolutions.size() + " sur " + selectedValidSolutions.size());
-
-        List<ContextualSolution> limitedSelectedSolutions = selectedSolutions.stream()
-                .limit(selectionCount)
-                .collect(Collectors.toList());
-
-        log(() -> "limited solution count : " + limitedSelectedSolutions.size());
-
-        solutions.addAll(limitedSelectedSolutions.stream().map(contextualSolution -> contextualSolution.solution).collect(Collectors.toList()));
-
-        while (solutions.size() < gameParameters.populationSize) {
-            ContextualSolution parent1 = limitedSelectedSolutions.get(RANDOM.nextInt(limitedSelectedSolutions.size()));
-            ContextualSolution parent2 = limitedSelectedSolutions.get(RANDOM.nextInt(limitedSelectedSolutions.size()));
-
-            if (!parent1.equals(parent2)) {
-                int nbOfBoxes = gameContext.boxes.size();
-
-                int[] child1 = new int[nbOfBoxes];
-                int[] child2 = new int[nbOfBoxes];
-
-                for (int i = 0; i < nbOfBoxes; i++) {
-                    int crossoverGene = RANDOM.nextInt(1000);
-
-                    if (crossoverGene <= crossOverRate) {
-                        child1[i] = parent1.solution.repartition[i];
-                        child2[i] = parent2.solution.repartition[i];
-                    } else {
-                        child1[i] = parent2.solution.repartition[i];
-                        child2[i] = parent1.solution.repartition[i];
+                    if (maybeNewVolumeOfGroup <= params.maxVolume) {
+                        volumeByGroup.put(randomGroup, maybeNewVolumeOfGroup);
+                        SortedSet<Integer> groupContent = contentByGroup.computeIfAbsent(randomGroup, k -> new TreeSet<>());
+                        groupContent.add(j);
+                        boxAffected = true;
                     }
-                }
-
-                int mutation = RANDOM.nextInt(100);
-                if (mutation < mutationRate) {
-                    int geneSwitch1 = RANDOM.nextInt(nbOfBoxes);
-                    int geneSwitch2 = RANDOM.nextInt(nbOfBoxes);
-
-                    int savedGene1ValueChild1 = child1[geneSwitch1];
-                    child1[geneSwitch1] = child1[geneSwitch2];
-                    child1[geneSwitch2] = savedGene1ValueChild1;
-
-
-                    int savedGene1ValueChild2 = child2[geneSwitch1];
-                    child2[geneSwitch1] = child2[geneSwitch2];
-                    child2[geneSwitch2] = savedGene1ValueChild2;
-                }
-
-                solutions.add(new Solution(child1));
-                solutions.add(new Solution(child2));
+                } while (!boxAffected);
             }
+
+            int[] solution = new int[sortedBoxes.size()];
+
+            for (SortedSet<Integer> groupContent : contentByGroup.values()) {
+                for (Integer boxIndex : groupContent) {
+                    solution[boxIndex] = groupContent.first();
+                }
+            }
+
+            solutions.add(solution);
         }
 
-        gameStatistics.crossoverTime.accept(System.currentTimeMillis() - startCrossoverTime);
-
-        log(() -> "Crossover iteration:" + gameStatistics.crossoverTime.getCount());
         return solutions;
     }
 
-    static List<Solution> generateRandomSolutions(GameContext gameContext, GameParameters gameParameters) {
-        List<Solution> generatedSolutions = new ArrayList<>();
-
-        while(generatedSolutions.size() < gameParameters.populationSize) {
-            generatedSolutions.add(generateRandomSolution(gameContext));
+    private static void debug(double[][] doubleMatrix, Params params) {
+        if (params.debug) {
+            print(doubleMatrix);
+            System.err.println("---");
         }
-
-        return generatedSolutions;
     }
 
-    static Solution generateRandomSolution(GameContext gameContext) {
-        int[] repartition = new int[gameContext.boxes.size()];
+    private static void debug(Params params, List<int[]> solutions) {
+        if (params.debug) {
+            print(solutions);
+            System.err.println("---");
+        }
+    }
 
-        List<Truck> trucks = new ArrayList<>();
-        for(int i = 0; i < gameContext.nbOfTrucks; i++) {
-            trucks.add(new Truck(i));
+    private static void debug(List<ScoredGroupedSolution> scoredGroupedSolutions, Params params) {
+        if (params.debug) {
+            for (ScoredGroupedSolution scoredGroupedSolution : scoredGroupedSolutions) {
+                print(scoredGroupedSolution);
+            }
+            System.err.println("---");
+        }
+    }
+
+    public static double[][] getInitialProbabilities(Params params) {
+        int nbOfBox = params.nbOfBox();
+        double[][] initialProbabilities = new double[nbOfBox][nbOfBox];
+
+        for (int j = 0; j < nbOfBox; j++) {
+            double uniformProbability = 1. / (j + 1.);
+            for (int i = 0; i <= j; i++) {
+                initialProbabilities[i][j] = uniformProbability;
+            }
+        }
+        return initialProbabilities;
+    }
+
+    public static Map<Integer, List<Integer>> organizedSolution(int[] solution, Params params) {
+        Map<Integer, List<Integer>> organizedSolution = new HashMap<>();
+        Map<Integer, List<Integer>> groupByBoxIndex = new HashMap<>();
+
+        for (int boxIndex = 0; boxIndex < solution.length; boxIndex++) {
+            Integer linkedBoxIndex = solution[boxIndex];
+
+            List<Integer> group = groupByBoxIndex.get(linkedBoxIndex);
+            if (group == null) {
+                group = new ArrayList<>();
+                organizedSolution.put(organizedSolution.size(), group);
+            }
+            group.add(boxIndex);
+            groupByBoxIndex.put(boxIndex, group);
         }
 
-        List<Box> sortedBoxes = new ArrayList<>(gameContext.boxes);
-        sortedBoxes.sort((box1, box2) -> box2.volume.compareTo(box1.volume));
+        // On force le nombre attendu de groupe
+        while (organizedSolution.size() < params.nbOfGroup) {
+            organizedSolution.put(organizedSolution.size(), new ArrayList<>());
+        }
 
-        for(int i=0; i < sortedBoxes.size(); i++) {
-            Box box = sortedBoxes.get(i);
+        return organizedSolution;
+    }
 
-            Truck truck;
+    public static double score(Map<Integer, List<Integer>> groupedSolution, Params params) {
+        DoubleSummaryStatistics weightsSummary = groupedSolution.values().stream()
+                .mapToDouble(groupedBoxes -> groupedBoxes.stream().mapToDouble(groupedBox -> params.boxes.get(groupedBox).weight).sum())
+                .summaryStatistics();
+
+        double maxVolume = groupedSolution.values().stream()
+                .mapToDouble(groupedBoxes -> groupedBoxes.stream().mapToDouble(groupedBox -> params.boxes.get(groupedBox).volume).sum())
+                .max().getAsDouble();
+
+        double scorePenalty = maxVolume > params.maxVolume ? params.invalidSolutionPenalty : 0.;
+        double isValidMultiplier = maxVolume > params.maxVolume ? -1 : 1;
+
+        return ((weightsSummary.getMax() - weightsSummary.getMin()) + scorePenalty) * isValidMultiplier;
+    }
+
+    public static int[] toCodinGameSolution(Map<Integer, List<Integer>> organizedSolution, Params params) {
+        int[] codinGameSolution = new int[params.nbOfBox()];
+
+        for (Map.Entry<Integer, List<Integer>> organizedSolutionEntry : organizedSolution.entrySet()) {
+            for (Integer boxIndex : organizedSolutionEntry.getValue()) {
+                codinGameSolution[boxIndex] = organizedSolutionEntry.getKey();
+            }
+        }
+
+        return codinGameSolution;
+    }
+
+    public static double[][] extractProbability(List<int[]> solutions, Params params) {
+        int nbOfBox = params.nbOfBox();
+
+        double[][] cardinalityMatrix = new double[nbOfBox][nbOfBox];
+
+        for (int[] solution : solutions) {
+            for (int i = 0; i < solution.length; i++) {
+                cardinalityMatrix[solution[i]][i] += 1.;
+            }
+        }
+
+        double[][] probabilities = new double[nbOfBox][nbOfBox];
+        for (int i = 0; i < nbOfBox; i++) {
+            for (int j = i; j < nbOfBox; j++) {
+                probabilities[i][j] = cardinalityMatrix[i][j] / (double) solutions.size();
+            }
+        }
+
+        return probabilities;
+    }
+
+    public static int[] generateSolution(Params params, double[][] probabilityMatrix) {
+        int nbOfBox = params.nbOfBox();
+        int remainingEmptyGroups = params.nbOfGroup;
+
+        int[] solution = new int[nbOfBox];
+
+        for (int i = 0; i < nbOfBox; i++) {
+            boolean affectationOk = false;
             do {
-                truck = trucks.get(RANDOM.nextInt(gameContext.nbOfTrucks));
-            } while (truck.volume + box.volume > gameContext.maxTruckVolume);
+                double random = randomGenerator.nextDouble();
 
-            truck.addVolume(box.volume);
-            if (truck.volume > gameContext.maxTruckVolume) {
-                System.out.println("failed");
-            }
-            repartition[box.id] = truck.id;
+                double probabilitySum = 0.;
+                for (int j = 0; j <= i; j++) {
+                    double probability = probabilityMatrix[j][i];
+
+                    probabilitySum += probability;
+                    if (probabilitySum >= random) {
+                        if (i == j) {
+                            if (remainingEmptyGroups > 0) {
+                                remainingEmptyGroups--;
+                                affectationOk = true;
+                            }
+                        } else {
+                            affectationOk = true;
+                        }
+                        solution[i] = j;
+                        break;
+                    }
+                }
+
+            } while (!affectationOk);
         }
 
-        return new Solution(repartition);
+        return solution;
     }
 
-    static class Solution {
-        final int[] repartition;
+    public static List<int[]> generateSolutions(double[][] probabilityMatrix, Params params) {
+        List<int[]> solutions = new ArrayList<>();
 
-        Solution(int[] repartition) {
-            this.repartition = repartition;
+        for (int i = 0; i < params.populationSize; i++) {
+            solutions.add(generateSolution(params, probabilityMatrix));
         }
 
-        String print() {
-            return IntStream.of(repartition).mapToObj(String::valueOf).collect(Collectors.joining(" "));
+        return solutions;
+    }
+
+    public static void print(List<int[]> arrays) {
+        for (int[] array : arrays) {
+            System.err.println(asString(array));
         }
     }
 
-    static int selectRandomBoxIndexByWeight(GameContext gameContext) {
-        List<Box> boxesSortedByWeight = gameContext.boxesSortedByWeight;
+    public static void print(int[] array) {
+        System.err.println(asString(array));
+    }
 
-        List<Double> boxSelectionStrength = boxesSortedByWeight.stream().map(box -> Math.sqrt(box.weight)).collect(Collectors.toList());
+    private static String asString(int[] array) {
+        return IntStream.of(array).mapToObj(String::valueOf).collect(Collectors.joining("|"));
+    }
 
-        double boxStrengthSum = boxSelectionStrength.stream().mapToDouble(myDouble -> myDouble).sum();
-
-        double randomSelector = RANDOM.nextDouble() * boxStrengthSum;
-
-        double runningStrengthSum = 0d;
-        for (int i = 0; i < boxesSortedByWeight.size(); i++) {
-            runningStrengthSum += boxSelectionStrength.get(i);
-
-            if (runningStrengthSum >= randomSelector) {
-                return boxesSortedByWeight.get(i).id;
-            }
+    public static void print(double[][] array) {
+        for (double[] doubles : array) {
+            print(doubles);
         }
+    }
 
-        throw new IllegalStateException();
+    public static void print(double[] array) {
+        System.err.println(DoubleStream.of(array).mapToObj(number -> String.format("%.3f", number)).collect(Collectors.joining("|")));
+    }
+
+    private static void print(ScoredGroupedSolution scoredGroupedSolution) {
+        System.err.println(asString(scoredGroupedSolution.solution) + " -> " + scoredGroupedSolution.score + " (isValid: " + scoredGroupedSolution.isValid + ")");
+    }
+
+    public static void print(Map<Integer, List<Integer>> groupedSolution) {
+        SortedMap<Integer, List<Integer>> sortedGroupedSolution = new TreeMap<>(groupedSolution);
+        for (Map.Entry<Integer, List<Integer>> sortedGroupedSolutionEntry : sortedGroupedSolution.entrySet()) {
+            System.err.println(sortedGroupedSolutionEntry.getKey() + " -> " + sortedGroupedSolutionEntry.getValue());
+        }
     }
 
     static class Box {
         final int id;
-        final Float weight;
-        final Float volume;
+        final double weight;
+        final double volume;
 
-        Box(int id, float weight, float volume) {
+        Box(int id, double weight, double volume) {
             this.id = id;
             this.weight = weight;
             this.volume = volume;
@@ -359,81 +335,83 @@ class Player {
 
         @Override
         public String toString() {
-            return weight + " " + volume;
-        }
-    }
-
-    static class Truck {
-        final Integer id;
-        Float volume = 0F;
-
-        Truck(int id) {
-            this.id = id;
-        }
-
-        Truck addVolume(float volume) {
-            this.volume += volume;
-            return this;
-        }
-
-        @Override
-        public String toString() {
-            return "Truck{" +
+            return "Box{" +
                     "id=" + id +
+                    ", weight=" + weight +
                     ", volume=" + volume +
                     '}';
         }
     }
 
-    private static void log(Supplier<Object>... logs) {
-        System.err.println(
-                Arrays.stream(logs)
-                        .map(Supplier::get)
-                        .map(o -> {
-                            if (o != null && o.getClass().isArray()) {
-                                return Collections.singletonList(o).toString();
-                            } else {
-                                return Objects.toString(o);
-                            }
-                        })
-                        .collect(Collectors.joining(", ")));
+    static class Statistic {
+
     }
 
-    public static class Statistics {
-        double[] data;
-        int size;
+    static class Params {
+        public List<Box> boxes;
+        public int nbOfGroup = 100;
+        public int populationSize = 1000;
+        public int bestSolutionSelectionCount = 50;
+        public long startTime = System.currentTimeMillis();
+        public int executionMaxTime = 48000;
+        public double invalidSolutionPenalty = 100.;
+        public double maxVolume = 100.;
+        public boolean debug;
+        public int executionMaxIteration = Integer.MAX_VALUE;
 
-        public Statistics(double[] data) {
-            this.data = data;
-            size = data.length;
+        public int nbOfBox() {
+            return boxes.size();
+        }
+    }
+
+    static class ScoredGroupedSolution implements Comparable<ScoredGroupedSolution> {
+        final double score;
+        final boolean isValid;
+        final int[] solution;
+        final Map<Integer, List<Integer>> organizedSolution;
+
+        ScoredGroupedSolution(double score, Map<Integer, List<Integer>> organizedSolution, int[] solution) {
+            this.score = Math.abs(score);
+            this.organizedSolution = organizedSolution;
+            this.solution = solution;
+            this.isValid = score >= 0;
         }
 
-        double getMean() {
-            double sum = 0.0;
-            for(double a : data)
-                sum += a;
-            return sum/size;
-        }
+        @Override
+        public int compareTo(ScoredGroupedSolution scoredGroupedSolution) {
+            double diff = score - scoredGroupedSolution.score;
 
-        double getVariance() {
-            double mean = getMean();
-            double temp = 0;
-            for(double a :data)
-                temp += (a-mean)*(a-mean);
-            return temp/(size-1);
-        }
-
-        double getStdDev() {
-            return Math.sqrt(getVariance());
-        }
-
-        public double median() {
-            Arrays.sort(data);
-
-            if (data.length % 2 == 0) {
-                return (data[(data.length / 2) - 1] + data[data.length / 2]) / 2.0;
+            if (diff > 0) {
+                return 1;
+            } else if (diff < 0) {
+                return -1;
+            } else {
+                return 0;
             }
-            return data[data.length / 2];
+        }
+
+        @Override
+        public String toString() {
+            return "ScoredGroupedSolution{" +
+                    "score=" + score +
+                    ",isValid=" + isValid +
+                    '}';
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            ScoredGroupedSolution that = (ScoredGroupedSolution) o;
+
+            return Double.compare(that.score, score) == 0;
+        }
+
+        @Override
+        public int hashCode() {
+            long temp = Double.doubleToLongBits(score);
+            return (int) (temp ^ (temp >>> 32));
         }
     }
 }

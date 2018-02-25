@@ -1,7 +1,6 @@
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -14,17 +13,20 @@ public class PlayerIT {
 
     @Test
     public void test() {
-        Player.GameContext gameContext = new Player.GameContext(getBoxes(),100,100);
-        Player.GameParameters gameParameters = new Player.GameParameters();
-        gameParameters.maxSearchDuration = 300000;
-        gameParameters.populationSize = 1000;
-        gameParameters.crossOverSelectionCount = 20;
-        gameParameters.crossOverExchangeRate = 1;
-        gameParameters.mutationRate = 1;
+        Player.Params params = new Player.Params();
 
-        Player.ContextualSolution solution = Player.findSolution(gameContext,gameParameters);
-        System.out.println("solution score: " + solution.score);
-        System.out.println("solution: " + Arrays.stream(solution.solution.repartition).boxed().collect(Collectors.toList()));
+        params.boxes = getBoxes(10);//.stream().sorted((b1, b2) -> Double.compare(b2.volume, b1.volume)).collect(Collectors.toList());
+        params.populationSize = 100;
+        params.bestSolutionSelectionCount = 10;
+        params.executionMaxTime = 000;
+        params.executionMaxIteration = 10;
+        params.nbOfGroup = 3;
+        params.debug = false;
+
+        System.out.println(params.boxes.stream().map(box -> String.valueOf(box.weight)).collect(Collectors.joining("|")));
+
+        int[] solution = Player.play(params);
+        Player.print(solution);
     }
 
     List<Player.Box> getBoxes() {
@@ -33,9 +35,13 @@ public class PlayerIT {
 
         for (int i =0 ; i < splitBoxes.length; i++) {
             String[] splitWeightVolume = splitBoxes[i].split(" ");
-            boxes.add(new Player.Box(i,Float.valueOf(splitWeightVolume[0]),Float.valueOf(splitWeightVolume[1])));
+            boxes.add(new Player.Box(i, Double.valueOf(splitWeightVolume[0]),Double.valueOf(splitWeightVolume[1])));
         }
 
         return boxes;
+    }
+
+    List<Player.Box> getBoxes(int size) {
+        return getBoxes().subList(0, size);
     }
 }
