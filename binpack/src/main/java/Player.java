@@ -57,14 +57,15 @@ class Player {
                 scoredGroupedSolutions.add(new Player.ScoredGroupedSolution(score, organizedSolution, solution));
             }
             debug(scoredGroupedSolutions, params);
-            List<ScoredGroupedSolution> validDistinctSolution = scoredGroupedSolutions.stream()
-                    .filter(scoredGroupedSolution -> scoredGroupedSolution.isValid)
+            scoredGroupedSolutions = scoredGroupedSolutions.stream()
+                    //.filter(scoredGroupedSolution -> scoredGroupedSolution.isValid)
                     .distinct()
                     .collect(Collectors.toList());
 
             // Selection des meilleurs solutions
             Collections.sort(scoredGroupedSolutions);
             int selectionSize = Math.min(scoredGroupedSolutions.size(), params.bestSolutionSelectionCount);
+            System.err.println("selectionSize:" + selectionSize);
             List<ScoredGroupedSolution> bestScoredGroupedSolution = scoredGroupedSolutions.subList(0, selectionSize);
 
             List<int[]> bestSolutions = new ArrayList<>();
@@ -79,7 +80,7 @@ class Player {
             //currentSolutions.addAll(bestSolutions);
 
             // Recuperation de la meilleur solution connue
-            Player.ScoredGroupedSolution bestSolutionInCurrentPopulation = scoredGroupedSolutions.get(0);
+            Player.ScoredGroupedSolution bestSolutionInCurrentPopulation = bestScoredGroupedSolution.get(0);
             if (bestSolutionEver == null || bestSolutionEver.score > bestSolutionInCurrentPopulation.score) {
                 bestSolutionEver = bestSolutionInCurrentPopulation;
                 System.err.println("Best solution score : " + bestSolutionEver);
@@ -89,6 +90,8 @@ class Player {
         }
 
         // Ecriture de la solution au format attendu
+        System.err.print("Best solution ever : ");
+        print(bestSolutionEver);
         return toCodinGameSolution(bestSolutionEver.organizedSolution, params);
     }
 
@@ -249,6 +252,7 @@ class Player {
 
         for (int i = 0; i < nbOfBox; i++) {
             boolean affectationOk = false;
+            int nbOfAffectationTry = 0;
             do {
                 double random = randomGenerator.nextDouble();
 
@@ -270,8 +274,14 @@ class Player {
                         break;
                     }
                 }
+                nbOfAffectationTry++;
+            } while (!affectationOk && nbOfAffectationTry != params.maxNbOfAffectationTry);
 
-            } while (!affectationOk);
+            if (!affectationOk) {
+                System.err.println("affectationKO pour i=" + i);
+                int randomValue = randomGenerator.nextInt(i);
+                solution[i] = randomValue;
+            }
         }
 
         return solution;
@@ -309,6 +319,14 @@ class Player {
 
     public static void print(double[] array) {
         System.err.println(DoubleStream.of(array).mapToObj(number -> String.format("%.3f", number)).collect(Collectors.joining("|")));
+    }
+
+    public static void printCol(double[][] matrix, int colIndex) {
+        double[] values = new double[matrix.length];
+        for (int i = 0; i < matrix.length; i++) {
+            values[i] = matrix[i][colIndex];
+        }
+        System.err.println(DoubleStream.of(values).mapToObj(number -> String.format("%.3f", number)).collect(Collectors.joining("|")));
     }
 
     private static void print(ScoredGroupedSolution scoredGroupedSolution) {
@@ -358,6 +376,7 @@ class Player {
         public double maxVolume = 100.;
         public boolean debug;
         public int executionMaxIteration = Integer.MAX_VALUE;
+        public int maxNbOfAffectationTry = 10;
 
         public int nbOfBox() {
             return boxes.size();

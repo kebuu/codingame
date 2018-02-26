@@ -15,12 +15,12 @@ public class PlayerIT {
     public void test() {
         Player.Params params = new Player.Params();
 
-        params.boxes = getBoxes(10);//.stream().sorted((b1, b2) -> Double.compare(b2.volume, b1.volume)).collect(Collectors.toList());
-        params.populationSize = 100;
-        params.bestSolutionSelectionCount = 10;
-        params.executionMaxTime = 000;
-        params.executionMaxIteration = 10;
-        params.nbOfGroup = 3;
+        params.boxes = getBoxes(300).stream().sorted((b1, b2) -> Double.compare(b2.volume, b1.volume)).collect(Collectors.toList());
+        params.populationSize = 2000;
+        params.bestSolutionSelectionCount = 500;
+        params.executionMaxTime = 100000;
+        //params.executionMaxIteration = 10;
+        params.invalidSolutionPenalty = 1000.;
         params.debug = false;
 
         System.out.println(params.boxes.stream().map(box -> String.valueOf(box.weight)).collect(Collectors.joining("|")));

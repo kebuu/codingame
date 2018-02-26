@@ -2,6 +2,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -80,13 +81,13 @@ public class PlayerTest {
 
     @Test
     public void testGenerateInitialSolutions() {
-        params.populationSize = 100;
-        params.bestSolutionSelectionCount = 50;
-        params.nbOfGroup = 4;
+        params.populationSize = 10;
+        params.bestSolutionSelectionCount = 3;
+        params.nbOfGroup = 3;
         params.maxVolume = 1000;
         params.executionMaxTime = 1000000;
         params.executionMaxIteration = 10;
-        params.debug = true;
+        params.debug = false;
         boxes.clear();
         boxes.add(new Player.Box(0, 10, 5));
         boxes.add(new Player.Box(1, 15, 10));
@@ -95,6 +96,7 @@ public class PlayerTest {
         boxes.add(new Player.Box(4, 30, 5));
         boxes.add(new Player.Box(5, 35, 75));
         boxes.add(new Player.Box(6, 35, 25));
+        Collections.sort(boxes, (o1, o2) -> Double.valueOf(o1.weight - o2.weight).intValue());
 
         List<int[]> solutions = Player.generateInitialSolutions(params);
         Player.print(solutions);
