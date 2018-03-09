@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 public class PlayerTest {
 
@@ -35,48 +34,81 @@ public class PlayerTest {
 
     @Test
     public void testExtractProbability() {
-        double[][] probabilityMatrix = Player.extractProbability(solutions, params);
+//        double[][] probabilityMatrix = Player.extractProbability(solutions, params);
+//
+//        Player.print(probabilityMatrix);
+//        System.out.println("------------------------");
+//
+//        List<int[]> nextGenerationSolutions = Player.generateSolutions(probabilityMatrix, params);
+//        Player.print(nextGenerationSolutions);
+//
+//        System.out.println("------------------------");
+//        Map<Integer, List<Integer>> groupedSolution1 = Player.organizedSolution(solutions.get(0), params);
+//        Player.print(groupedSolution1);
+//        Player.print(Player.toCodinGameSolution(groupedSolution1, params));
+//        System.out.println(Player.score(groupedSolution1, params));
+//        System.out.println("------------------------");
+//
+//        Map<Integer, List<Integer>> groupedSolution2 = Player.organizedSolution(solutions.get(1), params);
+//        Player.print(groupedSolution2);
+//        Player.print(Player.toCodinGameSolution(groupedSolution2, params));
+//        System.out.println(Player.score(groupedSolution2, params));
+//        System.out.println("------------------------");
+//
+//        Map<Integer, List<Integer>> groupedSolution3 = Player.organizedSolution(solutions.get(4), params);
+//        Player.print(groupedSolution3);
+//        Player.print(Player.toCodinGameSolution(groupedSolution3, params));
+//        System.out.println(Player.score(groupedSolution3, params));
+//        System.out.println("------------------------");
+//
+//        Map<Integer, List<Integer>> groupedSolution4 = Player.organizedSolution(solutions.get(5), params);
+//        Player.print(groupedSolution4);
+//        Player.print(Player.toCodinGameSolution(groupedSolution4, params));
+//        System.out.println(Player.score(groupedSolution4, params));
+//
+//        double[][] initialProbabilities = Player.getInitialProbabilities(params);
+//
+//        System.out.println("------------------------");
+//        Player.print(initialProbabilities);
+//
+//        List<int[]> initialSolutions = Player.generateSolutions(initialProbabilities, params);
+//        double[][] calculatedInitialProbabilities = Player.extractProbability(initialSolutions, params);
+//
+//        System.out.println("------------------------");
+//        Player.print(calculatedInitialProbabilities);
 
-        Player.print(probabilityMatrix);
-        System.out.println("------------------------");
+        List<Player.Box> boxes = new ArrayList<>();
+        boxes.add(new Player.Box(0, 1, 1));
+        boxes.add(new Player.Box(1, 2, 2));
+        boxes.add(new Player.Box(2, 5, 4));
+        boxes.add(new Player.Box(3, 3, 8));
+        boxes.add(new Player.Box(4, 2, 1));
+        boxes.add(new Player.Box(5, 9, 2));
+        boxes.add(new Player.Box(6, 9, 4));
+        boxes.add(new Player.Box(7, 5, 8));
+        boxes.add(new Player.Box(8, 5, 1));
+        boxes.add(new Player.Box(9, 7, 2));
+        boxes.add(new Player.Box(10, 10, 4));
+        boxes.add(new Player.Box(11, 1, 8));
+        boxes.add(new Player.Box(12, 4, 1));
+        boxes.add(new Player.Box(13, 4, 2));
+        boxes.add(new Player.Box(13, 8, 4));
 
-        List<int[]> nextGenerationSolutions = Player.generateSolutions(probabilityMatrix, params);
-        Player.print(nextGenerationSolutions);
+        double volumeSum = boxes.stream().mapToDouble(b -> b.volume).sum();
+        double weightSum = boxes.stream().mapToDouble(b -> b.weight).sum();
 
-        System.out.println("------------------------");
-        Map<Integer, List<Integer>> groupedSolution1 = Player.organizedSolution(solutions.get(0), params);
-        Player.print(groupedSolution1);
-        Player.print(Player.toCodinGameSolution(groupedSolution1, params));
-        System.out.println(Player.score(groupedSolution1, params));
-        System.out.println("------------------------");
+        System.out.println("volumeSum:" + volumeSum);
+        System.out.println("weigthSum:" + weightSum);
 
-        Map<Integer, List<Integer>> groupedSolution2 = Player.organizedSolution(solutions.get(1), params);
-        Player.print(groupedSolution2);
-        Player.print(Player.toCodinGameSolution(groupedSolution2, params));
-        System.out.println(Player.score(groupedSolution2, params));
-        System.out.println("------------------------");
-
-        Map<Integer, List<Integer>> groupedSolution3 = Player.organizedSolution(solutions.get(4), params);
-        Player.print(groupedSolution3);
-        Player.print(Player.toCodinGameSolution(groupedSolution3, params));
-        System.out.println(Player.score(groupedSolution3, params));
-        System.out.println("------------------------");
-
-        Map<Integer, List<Integer>> groupedSolution4 = Player.organizedSolution(solutions.get(5), params);
-        Player.print(groupedSolution4);
-        Player.print(Player.toCodinGameSolution(groupedSolution4, params));
-        System.out.println(Player.score(groupedSolution4, params));
-
-        double[][] initialProbabilities = Player.getInitialProbabilities(params);
-
-        System.out.println("------------------------");
-        Player.print(initialProbabilities);
-
-        List<int[]> initialSolutions = Player.generateSolutions(initialProbabilities, params);
-        double[][] calculatedInitialProbabilities = Player.extractProbability(initialSolutions, params);
-
-        System.out.println("------------------------");
-        Player.print(calculatedInitialProbabilities);
+        params.boxes = boxes;
+        params.nbOfGroup = 3;
+        params.maxVolume = 20.;
+        params.invalidSolutionPenalty = 100.;
+        params.debug = true;
+        params.populationSize = 50;
+        params.bestSolutionSelectionCount = 8;
+        params.executionMaxIteration = 10;
+        Player.play(params);
     }
 
     @Test

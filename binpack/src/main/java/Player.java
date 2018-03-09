@@ -35,14 +35,14 @@ class Player {
         System.out.println(IntStream.of(codinGameSolution).mapToObj(String::valueOf).collect(Collectors.joining(" ")));
     }
 
-    static int[] play(Player.Params params) {
+    static int[] play(Params params) {
         // Initialisation des premieres solutions
         double[][] currentProbabilities = getInitialProbabilities(params);
         //List<int[]> currentSolutions = generateSolutions(currentProbabilities, params);
         List<int[]> currentSolutions = generateInitialSolutions(params);
 
         // Initialisation du meilleur resultat...
-        Player.ScoredGroupedSolution bestSolutionEver = null;
+        ScoredGroupedSolution bestSolutionEver = null;
 
         int iterationCount = 0;
         while (System.currentTimeMillis() - params.startTime < params.executionMaxTime  && iterationCount < params.executionMaxIteration) {
@@ -54,13 +54,13 @@ class Player {
             for (int[] solution : currentSolutions) {
                 Map<Integer, List<Integer>> organizedSolution = organizedSolution(solution, params);
                 double score = score(organizedSolution, params);
-                scoredGroupedSolutions.add(new Player.ScoredGroupedSolution(score, organizedSolution, solution));
+                scoredGroupedSolutions.add(new ScoredGroupedSolution(score, organizedSolution, solution));
             }
             debug(scoredGroupedSolutions, params);
-            scoredGroupedSolutions = scoredGroupedSolutions.stream()
-                    //.filter(scoredGroupedSolution -> scoredGroupedSolution.isValid)
-                    .distinct()
-                    .collect(Collectors.toList());
+//            scoredGroupedSolutions = scoredGroupedSolutions.stream()
+//                    .filter(scoredGroupedSolution -> scoredGroupedSolution.isValid)
+//                    .distinct()
+//                    .collect(Collectors.toList());
 
             // Selection des meilleurs solutions
             Collections.sort(scoredGroupedSolutions);
@@ -69,7 +69,7 @@ class Player {
             List<ScoredGroupedSolution> bestScoredGroupedSolution = scoredGroupedSolutions.subList(0, selectionSize);
 
             List<int[]> bestSolutions = new ArrayList<>();
-            for (Player.ScoredGroupedSolution scoredGroupedSolution : bestScoredGroupedSolution) {
+            for (ScoredGroupedSolution scoredGroupedSolution : bestScoredGroupedSolution) {
                 bestSolutions.add(scoredGroupedSolution.solution);
             }
             debug(bestScoredGroupedSolution, params);
@@ -80,7 +80,7 @@ class Player {
             //currentSolutions.addAll(bestSolutions);
 
             // Recuperation de la meilleur solution connue
-            Player.ScoredGroupedSolution bestSolutionInCurrentPopulation = bestScoredGroupedSolution.get(0);
+            ScoredGroupedSolution bestSolutionInCurrentPopulation = bestScoredGroupedSolution.get(0);
             if (bestSolutionEver == null || bestSolutionEver.score > bestSolutionInCurrentPopulation.score) {
                 bestSolutionEver = bestSolutionInCurrentPopulation;
                 System.err.println("Best solution score : " + bestSolutionEver);
@@ -248,43 +248,84 @@ class Player {
         int nbOfBox = params.nbOfBox();
         int remainingEmptyGroups = params.nbOfGroup;
 
+        Map<Integer, Double> volumeByGroup = new HashMap<>();
+        Map<Integer, Integer> boxToGroupMapping = new HashMap<>();
+
         int[] solution = new int[nbOfBox];
 
-        for (int i = 0; i < nbOfBox; i++) {
-            boolean affectationOk = false;
-            int nbOfAffectationTry = 0;
-            do {
-                double random = randomGenerator.nextDouble();
+        for (int boxId = 0; boxId < nbOfBox; boxId++) {
+            solution[boxId] = -1;
 
-                double probabilitySum = 0.;
-                for (int j = 0; j <= i; j++) {
-                    double probability = probabilityMatrix[j][i];
+            int effectiveMaxPredecessorId = boxId;
+            double totalProbability = 1.0;
 
-                    probabilitySum += probability;
-                    if (probabilitySum >= random) {
-                        if (i == j) {
-                            if (remainingEmptyGroups > 0) {
-                                remainingEmptyGroups--;
-                                affectationOk = true;
-                            }
-                        } else {
-                            affectationOk = true;
+            if (remainingEmptyGroups == 0) {
+                effectiveMaxPredecessorId -= 1;
+                totalProbability -= probabilityMatrix[boxId][boxId];
+            }
+
+            double random = randomGenerator.nextDouble() * totalProbability;
+
+            double probabilitySum = 0.;
+            for (int predecessorId = 0; predecessorId <= effectiveMaxPredecessorId; predecessorId++) {
+                double probability = probabilityMatrix[predecessorId][boxId];
+
+                probabilitySum += probability;
+                if (probabilitySum >= random || boxId == predecessorId) {
+                    if (boxId == predecessorId) {
+                        if (remainingEmptyGroups > 0) {
+                            remainingEmptyGroups--;
                         }
-                        solution[i] = j;
-                        break;
                     }
-                }
-                nbOfAffectationTry++;
-            } while (!affectationOk && nbOfAffectationTry != params.maxNbOfAffectationTry);
 
-            if (!affectationOk) {
-                System.err.println("affectationKO pour i=" + i);
-                int randomValue = randomGenerator.nextInt(i);
-                solution[i] = randomValue;
+                    Integer targetGroup = boxToGroupMapping.computeIfAbsent(predecessorId, k -> k);
+                    affectTargetGroupToBoxId(targetGroup, boxId, solution, volumeByGroup, boxToGroupMapping, params);
+                    break;
+                }
+            }
+
+            if (solution[boxId] == -1) {
+                if (remainingEmptyGroups == 0) {
+                    Integer leastVolumedGroup = getLeastVolumedGroup(volumeByGroup);
+
+                    affectTargetGroupToBoxId(leastVolumedGroup, boxId, solution, volumeByGroup, boxToGroupMapping, params);
+                } else {
+                    throw new RuntimeException();
+                }
             }
         }
 
         return solution;
+    }
+
+    private static Integer getLeastVolumedGroup(Map<Integer, Double> volumeByGroup) {
+        return volumeByGroup.entrySet()
+            .stream().sorted(Comparator.comparing(Map.Entry::getValue))
+            .findFirst()
+            .map(Map.Entry::getKey)
+            .orElseThrow(RuntimeException::new);
+    }
+
+    private static void affectTargetGroupToBoxId(Integer targetGroup, int boxId, int[] solution, Map<Integer, Double> volumeByGroup, Map<Integer, Integer> boxToGroupMapping, Params params) {
+        Integer effectiveTargetGroup = targetGroup;
+
+        Double volume = volumeByGroup.computeIfAbsent(effectiveTargetGroup, k -> 0.);
+        double newVolume = volume + params.boxes.get(boxId).volume;
+
+        if (newVolume > params.maxVolume) {
+            if (volumeByGroup.size() < params.nbOfGroup) {
+                effectiveTargetGroup = boxId;
+            } else {
+                effectiveTargetGroup = getLeastVolumedGroup(volumeByGroup);
+            }
+
+            volume = volumeByGroup.computeIfAbsent(effectiveTargetGroup, k -> 0.);
+            newVolume = volume + params.boxes.get(boxId).volume;
+        }
+
+        volumeByGroup.put(effectiveTargetGroup, newVolume);
+        boxToGroupMapping.put(boxId, effectiveTargetGroup);
+        solution[boxId] = effectiveTargetGroup;
     }
 
     public static List<int[]> generateSolutions(double[][] probabilityMatrix, Params params) {

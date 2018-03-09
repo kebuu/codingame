@@ -1,8 +1,8 @@
-import org.junit.jupiter.api.Test;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import org.junit.Test;
 
 public class PlayerIT {
 
@@ -15,12 +15,12 @@ public class PlayerIT {
     public void test() {
         Player.Params params = new Player.Params();
 
-        params.boxes = getBoxes(300).stream().sorted((b1, b2) -> Double.compare(b2.volume, b1.volume)).collect(Collectors.toList());
-        params.populationSize = 2000;
-        params.bestSolutionSelectionCount = 500;
+        params.boxes = getBoxes(200);//.stream().sorted((b1, b2) -> Double.compare(b2.volume, b1.volume)).collect(Collectors.toList());
+        params.populationSize = 10000;
+        params.bestSolutionSelectionCount = 50;
         params.executionMaxTime = 100000;
         //params.executionMaxIteration = 10;
-        params.invalidSolutionPenalty = 1000.;
+        params.invalidSolutionPenalty = 100.;
         params.debug = false;
 
         System.out.println(params.boxes.stream().map(box -> String.valueOf(box.weight)).collect(Collectors.joining("|")));
