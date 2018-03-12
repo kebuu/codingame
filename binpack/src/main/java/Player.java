@@ -36,10 +36,7 @@ class Player {
     }
 
     static int[] play(Params params) {
-        // Initialisation des premieres solutions
-        double[][] currentProbabilities = getInitialProbabilities(params);
-        //List<int[]> currentSolutions = generateSolutions(currentProbabilities, params);
-        List<int[]> currentSolutions = generateInitialSolutions(params);
+        List<ScoredGroupedSolution> currentSolutions = generateInitialSolutions(params);
 
         // Initialisation du meilleur resultat...
         ScoredGroupedSolution bestSolutionEver = null;
@@ -47,40 +44,30 @@ class Player {
         int iterationCount = 0;
         while (System.currentTimeMillis() - params.startTime < params.executionMaxTime  && iterationCount < params.executionMaxIteration) {
             System.err.println(System.currentTimeMillis() - params.startTime + ". Iteration : " + iterationCount++);
-            debug(currentProbabilities, params);
 
-            // Calcul du score de chaque solution et reorganisation des solutions en groupe
-            List<ScoredGroupedSolution> scoredGroupedSolutions = new ArrayList<>();
-            for (int[] solution : currentSolutions) {
-                Map<Integer, List<Integer>> organizedSolution = organizedSolution(solution, params);
-                double score = score(organizedSolution, params);
-                scoredGroupedSolutions.add(new ScoredGroupedSolution(score, organizedSolution, solution));
-            }
-            debug(scoredGroupedSolutions, params);
 //            scoredGroupedSolutions = scoredGroupedSolutions.stream()
 //                    .filter(scoredGroupedSolution -> scoredGroupedSolution.isValid)
 //                    .distinct()
 //                    .collect(Collectors.toList());
 
             // Selection des meilleurs solutions
-            Collections.sort(scoredGroupedSolutions);
-            int selectionSize = Math.min(scoredGroupedSolutions.size(), params.bestSolutionSelectionCount);
-            System.err.println("selectionSize:" + selectionSize);
-            List<ScoredGroupedSolution> bestScoredGroupedSolution = scoredGroupedSolutions.subList(0, selectionSize);
+            Collections.sort(currentSolutions);
+            int selectionSize = Math.min(currentSolutions.size(), params.bestSolutionSelectionCount);
+            System.err.println("Effective selection size:" + selectionSize);
+            List<ScoredGroupedSolution> bestScoredGroupedSolutions = currentSolutions.subList(0, selectionSize);
 
             List<int[]> bestSolutions = new ArrayList<>();
-            for (ScoredGroupedSolution scoredGroupedSolution : bestScoredGroupedSolution) {
+            for (ScoredGroupedSolution scoredGroupedSolution : bestScoredGroupedSolutions) {
                 bestSolutions.add(scoredGroupedSolution.solution);
             }
-            debug(bestScoredGroupedSolution, params);
+            debug(bestScoredGroupedSolutions, params);
 
             // Generation de la prochaine generation a partir des meilleurs solutions de la population courante
-            currentProbabilities = extractProbability(bestSolutions, params);
-            currentSolutions = generateSolutions(currentProbabilities, params);
+            currentSolutions = generateNextGenerationSolutions(bestScoredGroupedSolutions, params);
             //currentSolutions.addAll(bestSolutions);
 
             // Recuperation de la meilleur solution connue
-            ScoredGroupedSolution bestSolutionInCurrentPopulation = bestScoredGroupedSolution.get(0);
+            ScoredGroupedSolution bestSolutionInCurrentPopulation = bestScoredGroupedSolutions.get(0);
             if (bestSolutionEver == null || bestSolutionEver.score > bestSolutionInCurrentPopulation.score) {
                 bestSolutionEver = bestSolutionInCurrentPopulation;
                 System.err.println("Best solution score : " + bestSolutionEver);
@@ -95,8 +82,8 @@ class Player {
         return toCodinGameSolution(bestSolutionEver.organizedSolution, params);
     }
 
-    static List<int[]> generateInitialSolutions(Params params) {
-        List<int[]> solutions = new ArrayList<>();
+    static List<ScoredGroupedSolution> generateInitialSolutions(Params params) {
+        List<ScoredGroupedSolution> solutions = new ArrayList<>();
 
         List<Box> sortedBoxes = params.boxes;//.stream().sorted((b1, b2) -> Double.compare(b2.volume, b1.volume)).collect(Collectors.toList());
 
@@ -130,10 +117,17 @@ class Player {
                 }
             }
 
-            solutions.add(solution);
+            ScoredGroupedSolution scoredGroupedSolution = toScoredGroupedSolution(solution, params);
+            solutions.add(scoredGroupedSolution);
         }
 
         return solutions;
+    }
+
+    private static Player.ScoredGroupedSolution toScoredGroupedSolution(int[] solution, Player.Params params) {
+        Map<Integer, List<Integer>> organizedSolution = organizeSolution(solution, params);
+        double score = score(organizedSolution, params);
+        return new Player.ScoredGroupedSolution(score, organizedSolution, solution);
     }
 
     private static void debug(double[][] doubleMatrix, Params params) {
@@ -159,20 +153,7 @@ class Player {
         }
     }
 
-    public static double[][] getInitialProbabilities(Params params) {
-        int nbOfBox = params.nbOfBox();
-        double[][] initialProbabilities = new double[nbOfBox][nbOfBox];
-
-        for (int j = 0; j < nbOfBox; j++) {
-            double uniformProbability = 1. / (j + 1.);
-            for (int i = 0; i <= j; i++) {
-                initialProbabilities[i][j] = uniformProbability;
-            }
-        }
-        return initialProbabilities;
-    }
-
-    public static Map<Integer, List<Integer>> organizedSolution(int[] solution, Params params) {
+    public static Map<Integer, List<Integer>> organizeSolution(int[] solution, Params params) {
         Map<Integer, List<Integer>> organizedSolution = new HashMap<>();
         Map<Integer, List<Integer>> groupByBoxIndex = new HashMap<>();
 
@@ -223,81 +204,6 @@ class Player {
         return codinGameSolution;
     }
 
-    public static double[][] extractProbability(List<int[]> solutions, Params params) {
-        int nbOfBox = params.nbOfBox();
-
-        double[][] cardinalityMatrix = new double[nbOfBox][nbOfBox];
-
-        for (int[] solution : solutions) {
-            for (int i = 0; i < solution.length; i++) {
-                cardinalityMatrix[solution[i]][i] += 1.;
-            }
-        }
-
-        double[][] probabilities = new double[nbOfBox][nbOfBox];
-        for (int i = 0; i < nbOfBox; i++) {
-            for (int j = i; j < nbOfBox; j++) {
-                probabilities[i][j] = cardinalityMatrix[i][j] / (double) solutions.size();
-            }
-        }
-
-        return probabilities;
-    }
-
-    public static int[] generateSolution(Params params, double[][] probabilityMatrix) {
-        int nbOfBox = params.nbOfBox();
-        int remainingEmptyGroups = params.nbOfGroup;
-
-        Map<Integer, Double> volumeByGroup = new HashMap<>();
-        Map<Integer, Integer> boxToGroupMapping = new HashMap<>();
-
-        int[] solution = new int[nbOfBox];
-
-        for (int boxId = 0; boxId < nbOfBox; boxId++) {
-            solution[boxId] = -1;
-
-            int effectiveMaxPredecessorId = boxId;
-            double totalProbability = 1.0;
-
-            if (remainingEmptyGroups == 0) {
-                effectiveMaxPredecessorId -= 1;
-                totalProbability -= probabilityMatrix[boxId][boxId];
-            }
-
-            double random = randomGenerator.nextDouble() * totalProbability;
-
-            double probabilitySum = 0.;
-            for (int predecessorId = 0; predecessorId <= effectiveMaxPredecessorId; predecessorId++) {
-                double probability = probabilityMatrix[predecessorId][boxId];
-
-                probabilitySum += probability;
-                if (probabilitySum >= random || boxId == predecessorId) {
-                    if (boxId == predecessorId) {
-                        if (remainingEmptyGroups > 0) {
-                            remainingEmptyGroups--;
-                        }
-                    }
-
-                    Integer targetGroup = boxToGroupMapping.computeIfAbsent(predecessorId, k -> k);
-                    affectTargetGroupToBoxId(targetGroup, boxId, solution, volumeByGroup, boxToGroupMapping, params);
-                    break;
-                }
-            }
-
-            if (solution[boxId] == -1) {
-                if (remainingEmptyGroups == 0) {
-                    Integer leastVolumedGroup = getLeastVolumedGroup(volumeByGroup);
-
-                    affectTargetGroupToBoxId(leastVolumedGroup, boxId, solution, volumeByGroup, boxToGroupMapping, params);
-                } else {
-                    throw new RuntimeException();
-                }
-            }
-        }
-
-        return solution;
-    }
-
     private static Integer getLeastVolumedGroup(Map<Integer, Double> volumeByGroup) {
         return volumeByGroup.entrySet()
             .stream().sorted(Comparator.comparing(Map.Entry::getValue))
@@ -328,14 +234,32 @@ class Player {
         solution[boxId] = effectiveTargetGroup;
     }
 
-    public static List<int[]> generateSolutions(double[][] probabilityMatrix, Params params) {
-        List<int[]> solutions = new ArrayList<>();
+    public static List<ScoredGroupedSolution> generateNextGenerationSolutions(List<ScoredGroupedSolution> scoredGroupedSolutions, Params params) {
+        List<ScoredGroupedSolution> solutions = new ArrayList<>();
+        solutions.addAll(scoredGroupedSolutions);
 
-        for (int i = 0; i < params.populationSize; i++) {
-            solutions.add(generateSolution(params, probabilityMatrix));
+        while (solutions.size() < params.populationSize) {
+            int firstParentIndex = randomGenerator.nextInt(scoredGroupedSolutions.size());
+            int secondParentIndex = randomGenerator.nextInt(scoredGroupedSolutions.size());
+
+            List<int[]> children = crossover(scoredGroupedSolutions.get(firstParentIndex), scoredGroupedSolutions.get(firstParentIndex), params);
+
+            for (int[] child : children) {
+                int[] solution = maybeMutate(child, params);
+                solutions.add(toScoredGroupedSolution(solution, params));
+            }
         }
 
         return solutions;
+    }
+
+    private static List<int[]> crossover(ScoredGroupedSolution scoredGroupedSolution, ScoredGroupedSolution scoredGroupedSolution1, Params params) {
+        return null;
+    }
+
+    private static int[] maybeMutate(int[] child, Params params) {
+
+        return new int[0];
     }
 
     public static void print(List<int[]> arrays) {
@@ -417,7 +341,7 @@ class Player {
         public double maxVolume = 100.;
         public boolean debug;
         public int executionMaxIteration = Integer.MAX_VALUE;
-        public int maxNbOfAffectationTry = 10;
+        public double mutationProbability = .1;
 
         public int nbOfBox() {
             return boxes.size();

@@ -39,29 +39,29 @@ public class PlayerTest {
 //        Player.print(probabilityMatrix);
 //        System.out.println("------------------------");
 //
-//        List<int[]> nextGenerationSolutions = Player.generateSolutions(probabilityMatrix, params);
+//        List<int[]> nextGenerationSolutions = Player.generateNextGenerationSolutions(probabilityMatrix, params);
 //        Player.print(nextGenerationSolutions);
 //
 //        System.out.println("------------------------");
-//        Map<Integer, List<Integer>> groupedSolution1 = Player.organizedSolution(solutions.get(0), params);
+//        Map<Integer, List<Integer>> groupedSolution1 = Player.organizeSolution(solutions.get(0), params);
 //        Player.print(groupedSolution1);
 //        Player.print(Player.toCodinGameSolution(groupedSolution1, params));
 //        System.out.println(Player.score(groupedSolution1, params));
 //        System.out.println("------------------------");
 //
-//        Map<Integer, List<Integer>> groupedSolution2 = Player.organizedSolution(solutions.get(1), params);
+//        Map<Integer, List<Integer>> groupedSolution2 = Player.organizeSolution(solutions.get(1), params);
 //        Player.print(groupedSolution2);
 //        Player.print(Player.toCodinGameSolution(groupedSolution2, params));
 //        System.out.println(Player.score(groupedSolution2, params));
 //        System.out.println("------------------------");
 //
-//        Map<Integer, List<Integer>> groupedSolution3 = Player.organizedSolution(solutions.get(4), params);
+//        Map<Integer, List<Integer>> groupedSolution3 = Player.organizeSolution(solutions.get(4), params);
 //        Player.print(groupedSolution3);
 //        Player.print(Player.toCodinGameSolution(groupedSolution3, params));
 //        System.out.println(Player.score(groupedSolution3, params));
 //        System.out.println("------------------------");
 //
-//        Map<Integer, List<Integer>> groupedSolution4 = Player.organizedSolution(solutions.get(5), params);
+//        Map<Integer, List<Integer>> groupedSolution4 = Player.organizeSolution(solutions.get(5), params);
 //        Player.print(groupedSolution4);
 //        Player.print(Player.toCodinGameSolution(groupedSolution4, params));
 //        System.out.println(Player.score(groupedSolution4, params));
@@ -71,7 +71,7 @@ public class PlayerTest {
 //        System.out.println("------------------------");
 //        Player.print(initialProbabilities);
 //
-//        List<int[]> initialSolutions = Player.generateSolutions(initialProbabilities, params);
+//        List<int[]> initialSolutions = Player.generateNextGenerationSolutions(initialProbabilities, params);
 //        double[][] calculatedInitialProbabilities = Player.extractProbability(initialSolutions, params);
 //
 //        System.out.println("------------------------");
