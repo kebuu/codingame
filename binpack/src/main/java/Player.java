@@ -10,7 +10,6 @@ import java.util.stream.IntStream;
 class Player {
 
     static Random randomGenerator = new Random(1);
-    static Statistic stats = new Statistic();
 
     public static void main(String args[]) {
         List<Box> allBoxes = new ArrayList<>();
@@ -36,60 +35,49 @@ class Player {
     }
 
     static int[] play(Params params) {
-        List<ScoredGroupedSolution> currentSolutions = generateInitialSolutions(params);
+        List<Solution> currentSolutions = generateInitialSolutions(params);
 
         // Initialisation du meilleur resultat...
-        ScoredGroupedSolution bestSolutionEver = null;
+        Collections.sort(currentSolutions);
+        Solution bestSolutionEver = currentSolutions.get(0);
 
         int iterationCount = 0;
         while (System.currentTimeMillis() - params.startTime < params.executionMaxTime  && iterationCount < params.executionMaxIteration) {
             System.err.println(System.currentTimeMillis() - params.startTime + ". Iteration : " + iterationCount++);
 
-//            scoredGroupedSolutions = scoredGroupedSolutions.stream()
-//                    .filter(scoredGroupedSolution -> scoredGroupedSolution.isValid)
-//                    .distinct()
-//                    .collect(Collectors.toList());
-
-            // Selection des meilleurs solutions
-            Collections.sort(currentSolutions);
+            // Selection des meilleures solutions
             int selectionSize = Math.min(currentSolutions.size(), params.bestSolutionSelectionCount);
             System.err.println("Effective selection size:" + selectionSize);
-            List<ScoredGroupedSolution> bestScoredGroupedSolutions = currentSolutions.subList(0, selectionSize);
-
-            List<int[]> bestSolutions = new ArrayList<>();
-            for (ScoredGroupedSolution scoredGroupedSolution : bestScoredGroupedSolutions) {
-                bestSolutions.add(scoredGroupedSolution.solution);
-            }
+            List<Solution> bestScoredGroupedSolutions = currentSolutions.subList(0, selectionSize);
             debug(bestScoredGroupedSolutions, params);
 
             // Generation de la prochaine generation a partir des meilleurs solutions de la population courante
             currentSolutions = generateNextGenerationSolutions(bestScoredGroupedSolutions, params);
-            //currentSolutions.addAll(bestSolutions);
+            Collections.sort(currentSolutions);
+            Solution bestSolutionInNextPopulation = bestScoredGroupedSolutions.get(0);
 
-            // Recuperation de la meilleur solution connue
-            ScoredGroupedSolution bestSolutionInCurrentPopulation = bestScoredGroupedSolutions.get(0);
-            if (bestSolutionEver == null || bestSolutionEver.score > bestSolutionInCurrentPopulation.score) {
-                bestSolutionEver = bestSolutionInCurrentPopulation;
+            if (bestSolutionEver.score > bestSolutionInNextPopulation.score) {
+                bestSolutionEver = bestSolutionInNextPopulation;
                 System.err.println("Best solution score : " + bestSolutionEver);
             } else {
-                System.err.println("Best solution in current population : " + bestSolutionInCurrentPopulation);
+                System.err.println("Best solution in current population : " + bestSolutionInNextPopulation);
             }
         }
 
         // Ecriture de la solution au format attendu
         System.err.print("Best solution ever : ");
         print(bestSolutionEver);
-        return toCodinGameSolution(bestSolutionEver.organizedSolution, params);
+        return toCodinGameSolution(bestSolutionEver, params);
     }
 
-    static List<ScoredGroupedSolution> generateInitialSolutions(Params params) {
-        List<ScoredGroupedSolution> solutions = new ArrayList<>();
+    static List<Solution> generateInitialSolutions(Params params) {
+        List<Solution> solutions = new ArrayList<>();
 
         List<Box> sortedBoxes = params.boxes;//.stream().sorted((b1, b2) -> Double.compare(b2.volume, b1.volume)).collect(Collectors.toList());
 
         for (int i = 0; i < params.populationSize; i++) {
             Map<Integer, Double> volumeByGroup = new HashMap<>();
-            Map<Integer, SortedSet<Integer>> contentByGroup = new HashMap<>();
+            Map<Integer, List<Integer>> contentByGroup = new HashMap<>();
 
             for (int j = 0; j < sortedBoxes.size(); j++) {
                 Box sortedBox = sortedBoxes.get(j);
@@ -102,7 +90,7 @@ class Player {
 
                     if (maybeNewVolumeOfGroup <= params.maxVolume) {
                         volumeByGroup.put(randomGroup, maybeNewVolumeOfGroup);
-                        SortedSet<Integer> groupContent = contentByGroup.computeIfAbsent(randomGroup, k -> new TreeSet<>());
+                        List<Integer> groupContent = contentByGroup.computeIfAbsent(randomGroup, k -> new ArrayList<>());
                         groupContent.add(j);
                         boxAffected = true;
                     }
@@ -111,23 +99,90 @@ class Player {
 
             int[] solution = new int[sortedBoxes.size()];
 
-            for (SortedSet<Integer> groupContent : contentByGroup.values()) {
+            for (List<Integer> groupContent : contentByGroup.values()) {
                 for (Integer boxIndex : groupContent) {
-                    solution[boxIndex] = groupContent.first();
+                    solution[boxIndex] = groupContent.get(0);
                 }
             }
 
-            ScoredGroupedSolution scoredGroupedSolution = toScoredGroupedSolution(solution, params);
-            solutions.add(scoredGroupedSolution);
+            solutions.add(new Solution(solution, params));
         }
 
         return solutions;
     }
 
-    private static Player.ScoredGroupedSolution toScoredGroupedSolution(int[] solution, Player.Params params) {
-        Map<Integer, List<Integer>> organizedSolution = organizeSolution(solution, params);
-        double score = score(organizedSolution, params);
-        return new Player.ScoredGroupedSolution(score, organizedSolution, solution);
+    private static int[] toCodinGameSolution(Solution solution, Params params) {
+        int[] codinGameSolution = new int[params.nbOfBox()];
+
+        for (Map.Entry<Integer, List<Integer>> organizedSolutionEntry : solution.boxesByGroup.entrySet()) {
+            for (Integer boxIndex : organizedSolutionEntry.getValue()) {
+                codinGameSolution[boxIndex] = organizedSolutionEntry.getKey();
+            }
+        }
+
+        return codinGameSolution;
+    }
+
+    private static List<Solution> generateNextGenerationSolutions(List<Solution> solutions, Params params) {
+        List<Solution> nextGenerationSolutions = new ArrayList<>();
+        nextGenerationSolutions.addAll(solutions);
+
+        while (nextGenerationSolutions.size() < params.populationSize) {
+            int firstParentIndex = randomGenerator.nextInt(solutions.size());
+            int secondParentIndex = randomGenerator.nextInt(solutions.size());
+
+            List<Solution> children = crossover(solutions.get(firstParentIndex), solutions.get(secondParentIndex), params);
+
+            for (Solution child : children) {
+                nextGenerationSolutions.add(maybeMutate(child, params).toValidSolution());
+            }
+        }
+
+        return nextGenerationSolutions;
+    }
+
+    private static List<Solution> crossover(Solution solution1, Solution solution2, Params params) {
+        int[] crossoverSolution1 = new int[params.nbOfBox()];
+        int[] crossoverSolution2 = new int[params.nbOfBox()];
+
+        int splitBoxIndex = randomGenerator.nextInt(params.nbOfBox());
+        for (int i = 0; i < params.nbOfBox(); i++) {
+            if (i < splitBoxIndex) {
+                crossoverSolution1[i] = solution1.rawSolution[i];
+                crossoverSolution2[i] = solution2.rawSolution[i];
+            } else {
+                crossoverSolution1[i] = solution2.rawSolution[i];
+                crossoverSolution2[i] = solution1.rawSolution[i];
+            }
+        }
+
+        List<Solution> solutions = new ArrayList<>();
+        solutions.add(new Solution(crossoverSolution1, params));
+        solutions.add(new Solution(crossoverSolution2, params));
+
+        return solutions;
+    }
+
+    private static Solution maybeMutate(Solution solution, Params params) {
+        Solution maybeMutatedSolution = solution;
+
+        double random = randomGenerator.nextDouble();
+        if (random < params.mutationProbability) {
+            int[] maybeMutatedRawSolution = solution.rawSolution.clone();
+
+            int boxToMutate1 = randomGenerator.nextInt(params.nbOfBox());
+            int boxToMutate2 = randomGenerator.nextInt(params.nbOfBox());
+
+            int initialGroupOfBox1 = solution.rawSolution[boxToMutate1];
+            int initialGroupOfBox2 = solution.rawSolution[boxToMutate2];
+
+            maybeMutatedRawSolution[boxToMutate1] = initialGroupOfBox2;
+            maybeMutatedRawSolution[boxToMutate2] = initialGroupOfBox1;
+
+            maybeMutatedSolution = new Solution(maybeMutatedRawSolution, params);
+        }
+
+        return maybeMutatedSolution;
     }
 
     private static void debug(double[][] doubleMatrix, Params params) {
@@ -144,131 +199,22 @@ class Player {
         }
     }
 
-    private static void debug(List<ScoredGroupedSolution> scoredGroupedSolutions, Params params) {
+    private static void debug(List<Solution> solutions, Params params) {
         if (params.debug) {
-            for (ScoredGroupedSolution scoredGroupedSolution : scoredGroupedSolutions) {
+            for (Solution scoredGroupedSolution : solutions) {
                 print(scoredGroupedSolution);
             }
             System.err.println("---");
         }
     }
 
-    public static Map<Integer, List<Integer>> organizeSolution(int[] solution, Params params) {
-        Map<Integer, List<Integer>> organizedSolution = new HashMap<>();
-        Map<Integer, List<Integer>> groupByBoxIndex = new HashMap<>();
-
-        for (int boxIndex = 0; boxIndex < solution.length; boxIndex++) {
-            Integer linkedBoxIndex = solution[boxIndex];
-
-            List<Integer> group = groupByBoxIndex.get(linkedBoxIndex);
-            if (group == null) {
-                group = new ArrayList<>();
-                organizedSolution.put(organizedSolution.size(), group);
-            }
-            group.add(boxIndex);
-            groupByBoxIndex.put(boxIndex, group);
-        }
-
-        // On force le nombre attendu de groupe
-        while (organizedSolution.size() < params.nbOfGroup) {
-            organizedSolution.put(organizedSolution.size(), new ArrayList<>());
-        }
-
-        return organizedSolution;
-    }
-
-    public static double score(Map<Integer, List<Integer>> groupedSolution, Params params) {
-        DoubleSummaryStatistics weightsSummary = groupedSolution.values().stream()
-                .mapToDouble(groupedBoxes -> groupedBoxes.stream().mapToDouble(groupedBox -> params.boxes.get(groupedBox).weight).sum())
-                .summaryStatistics();
-
-        double maxVolume = groupedSolution.values().stream()
-                .mapToDouble(groupedBoxes -> groupedBoxes.stream().mapToDouble(groupedBox -> params.boxes.get(groupedBox).volume).sum())
-                .max().getAsDouble();
-
-        double scorePenalty = maxVolume > params.maxVolume ? params.invalidSolutionPenalty : 0.;
-        double isValidMultiplier = maxVolume > params.maxVolume ? -1 : 1;
-
-        return ((weightsSummary.getMax() - weightsSummary.getMin()) + scorePenalty) * isValidMultiplier;
-    }
-
-    public static int[] toCodinGameSolution(Map<Integer, List<Integer>> organizedSolution, Params params) {
-        int[] codinGameSolution = new int[params.nbOfBox()];
-
-        for (Map.Entry<Integer, List<Integer>> organizedSolutionEntry : organizedSolution.entrySet()) {
-            for (Integer boxIndex : organizedSolutionEntry.getValue()) {
-                codinGameSolution[boxIndex] = organizedSolutionEntry.getKey();
-            }
-        }
-
-        return codinGameSolution;
-    }
-
-    private static Integer getLeastVolumedGroup(Map<Integer, Double> volumeByGroup) {
-        return volumeByGroup.entrySet()
-            .stream().sorted(Comparator.comparing(Map.Entry::getValue))
-            .findFirst()
-            .map(Map.Entry::getKey)
-            .orElseThrow(RuntimeException::new);
-    }
-
-    private static void affectTargetGroupToBoxId(Integer targetGroup, int boxId, int[] solution, Map<Integer, Double> volumeByGroup, Map<Integer, Integer> boxToGroupMapping, Params params) {
-        Integer effectiveTargetGroup = targetGroup;
-
-        Double volume = volumeByGroup.computeIfAbsent(effectiveTargetGroup, k -> 0.);
-        double newVolume = volume + params.boxes.get(boxId).volume;
-
-        if (newVolume > params.maxVolume) {
-            if (volumeByGroup.size() < params.nbOfGroup) {
-                effectiveTargetGroup = boxId;
-            } else {
-                effectiveTargetGroup = getLeastVolumedGroup(volumeByGroup);
-            }
-
-            volume = volumeByGroup.computeIfAbsent(effectiveTargetGroup, k -> 0.);
-            newVolume = volume + params.boxes.get(boxId).volume;
-        }
-
-        volumeByGroup.put(effectiveTargetGroup, newVolume);
-        boxToGroupMapping.put(boxId, effectiveTargetGroup);
-        solution[boxId] = effectiveTargetGroup;
-    }
-
-    public static List<ScoredGroupedSolution> generateNextGenerationSolutions(List<ScoredGroupedSolution> scoredGroupedSolutions, Params params) {
-        List<ScoredGroupedSolution> solutions = new ArrayList<>();
-        solutions.addAll(scoredGroupedSolutions);
-
-        while (solutions.size() < params.populationSize) {
-            int firstParentIndex = randomGenerator.nextInt(scoredGroupedSolutions.size());
-            int secondParentIndex = randomGenerator.nextInt(scoredGroupedSolutions.size());
-
-            List<int[]> children = crossover(scoredGroupedSolutions.get(firstParentIndex), scoredGroupedSolutions.get(firstParentIndex), params);
-
-            for (int[] child : children) {
-                int[] solution = maybeMutate(child, params);
-                solutions.add(toScoredGroupedSolution(solution, params));
-            }
-        }
-
-        return solutions;
-    }
-
-    private static List<int[]> crossover(ScoredGroupedSolution scoredGroupedSolution, ScoredGroupedSolution scoredGroupedSolution1, Params params) {
-        return null;
-    }
-
-    private static int[] maybeMutate(int[] child, Params params) {
-
-        return new int[0];
-    }
-
-    public static void print(List<int[]> arrays) {
+    static void print(List<int[]> arrays) {
         for (int[] array : arrays) {
             System.err.println(asString(array));
         }
     }
 
-    public static void print(int[] array) {
+    static void print(int[] array) {
         System.err.println(asString(array));
     }
 
@@ -276,13 +222,13 @@ class Player {
         return IntStream.of(array).mapToObj(String::valueOf).collect(Collectors.joining("|"));
     }
 
-    public static void print(double[][] array) {
+    private static void print(double[][] array) {
         for (double[] doubles : array) {
             print(doubles);
         }
     }
 
-    public static void print(double[] array) {
+    private static void print(double[] array) {
         System.err.println(DoubleStream.of(array).mapToObj(number -> String.format("%.3f", number)).collect(Collectors.joining("|")));
     }
 
@@ -294,8 +240,14 @@ class Player {
         System.err.println(DoubleStream.of(values).mapToObj(number -> String.format("%.3f", number)).collect(Collectors.joining("|")));
     }
 
-    private static void print(ScoredGroupedSolution scoredGroupedSolution) {
-        System.err.println(asString(scoredGroupedSolution.solution) + " -> " + scoredGroupedSolution.score + " (isValid: " + scoredGroupedSolution.isValid + ")");
+    private static void print(Solution solution) {
+        System.err.println(asString(solution.rawSolution) + " -> " + solution.score + " (isValid: " + solution.valid + ")");
+    }
+
+    protected static void printSolution(List<Solution> solutions) {
+        for (Solution solution : solutions) {
+            print(solution);
+        }
     }
 
     public static void print(Map<Integer, List<Integer>> groupedSolution) {
@@ -326,44 +278,115 @@ class Player {
         }
     }
 
-    static class Statistic {
-
-    }
-
     static class Params {
-        public List<Box> boxes;
-        public int nbOfGroup = 100;
-        public int populationSize = 1000;
-        public int bestSolutionSelectionCount = 50;
-        public long startTime = System.currentTimeMillis();
-        public int executionMaxTime = 48000;
-        public double invalidSolutionPenalty = 100.;
-        public double maxVolume = 100.;
-        public boolean debug;
-        public int executionMaxIteration = Integer.MAX_VALUE;
-        public double mutationProbability = .1;
+         List<Box> boxes;
+         int nbOfGroup = 100;
+         int populationSize = 1000;
+         int bestSolutionSelectionCount = 50;
+         long startTime = System.currentTimeMillis();
+         int executionMaxTime = 48000;
+         double invalidSolutionPenalty = 100.;
+         double maxVolume = 100.;
+         boolean debug;
+         int executionMaxIteration = Integer.MAX_VALUE;
+         double mutationProbability = .1;
 
-        public int nbOfBox() {
+         int nbOfBox() {
             return boxes.size();
         }
     }
 
-    static class ScoredGroupedSolution implements Comparable<ScoredGroupedSolution> {
+    static class Solution implements Comparable<Solution> {
+        final int[] rawSolution;
+        final boolean valid;
         final double score;
-        final boolean isValid;
-        final int[] solution;
-        final Map<Integer, List<Integer>> organizedSolution;
+        final Params params;
 
-        ScoredGroupedSolution(double score, Map<Integer, List<Integer>> organizedSolution, int[] solution) {
-            this.score = Math.abs(score);
-            this.organizedSolution = organizedSolution;
-            this.solution = solution;
-            this.isValid = score >= 0;
+        Map<Integer, Double> volumeByGroup = new HashMap<>();
+        Map<Integer, Double> weightByGroup = new HashMap<>();
+        Map<Integer, List<Integer>> boxesByGroup = new HashMap<>();
+
+        Solution(int[] rawSolution, Params params) {
+            this.params = params;
+            this.rawSolution = rawSolution;
+
+            for (int solutionArrayIndex : rawSolution) {
+                Box box = params.boxes.get(solutionArrayIndex);
+                Integer group = rawSolution[solutionArrayIndex];
+
+                volumeByGroup.compute(group, (key, currentValue) -> currentValue == null ? box.volume : currentValue + box.volume);
+                weightByGroup.compute(group, (key, currentValue) -> currentValue == null ? box.weight : currentValue + box.weight);
+
+                List<Integer> groupContent = boxesByGroup.getOrDefault(group, new ArrayList<>());
+                groupContent.add(solutionArrayIndex);
+            }
+
+            // On force le nombre attendu de groupe
+            while (boxesByGroup.size() < params.nbOfGroup) {
+                boxesByGroup.put(boxesByGroup.size(), new ArrayList<>());
+            }
+
+            valid = volumeByGroup.values().stream().noneMatch(volume -> volume > params.maxVolume);
+
+            DoubleSummaryStatistics weightSummary = weightByGroup.values().stream().mapToDouble(value -> value).summaryStatistics();
+            score = weightSummary.getMax() - weightSummary.getMin();
+        }
+
+        Solution toValidSolution() {
+            if (valid) {
+                return this;
+            } else {
+                int[] newSolution = rawSolution.clone();
+                Map<Integer, Double> newVolumeByGroup = new HashMap<>(volumeByGroup);
+                Map<Integer, Double> newWeightByGroup = new HashMap<>(weightByGroup);
+                Map<Integer, List<Integer>> newBoxesByGroup = new HashMap<>(boxesByGroup);
+
+                Integer invalidGroup = nextInvalidGroup();
+                while (invalidGroup != null) {
+                    Integer smallerBoxIdInInvalidGroup = newBoxesByGroup.get(invalidGroup).stream()
+                            .min(Comparator.comparingDouble(boxId -> params.boxes.get(boxId).volume))
+                            .get();
+
+                    Integer lessLoadedGroup = newVolumeByGroup.entrySet().stream()
+                            .min(Comparator.comparingDouble(Map.Entry::getValue))
+                            .map(Map.Entry::getKey)
+                            .get();
+
+                    Box box = params.boxes.get(smallerBoxIdInInvalidGroup);
+                    newVolumeByGroup.put(invalidGroup, newVolumeByGroup.get(invalidGroup) - box.volume);
+                    newVolumeByGroup.put(lessLoadedGroup, newVolumeByGroup.get(lessLoadedGroup) + box.volume);
+                    newWeightByGroup.put(invalidGroup, newWeightByGroup.get(invalidGroup) - box.weight);
+                    newWeightByGroup.put(lessLoadedGroup, newWeightByGroup.get(lessLoadedGroup) + box.weight);
+                    newBoxesByGroup.get(invalidGroup).remove(smallerBoxIdInInvalidGroup);
+                    newBoxesByGroup.get(lessLoadedGroup).add(smallerBoxIdInInvalidGroup);
+
+                    newSolution[smallerBoxIdInInvalidGroup] = lessLoadedGroup;
+                    invalidGroup = nextInvalidGroup();
+                }
+
+                return new Solution(newSolution, params);
+            }
+        }
+
+        private Integer nextInvalidGroup() {
+            return volumeByGroup.entrySet().stream()
+                    .filter(volumeByGroupEntry -> volumeByGroupEntry.getValue() > params.maxVolume)
+                    .findAny()
+                    .map(Map.Entry::getKey)
+                    .orElse(null);
         }
 
         @Override
-        public int compareTo(ScoredGroupedSolution scoredGroupedSolution) {
-            double diff = score - scoredGroupedSolution.score;
+        public String toString() {
+            return "Solution{" +
+                    "valid=" + valid +
+                    ", score=" + score +
+                    '}';
+        }
+
+        @Override
+        public int compareTo(Solution solution) {
+            double diff = score - solution.score;
 
             if (diff > 0) {
                 return 1;
@@ -372,30 +395,6 @@ class Player {
             } else {
                 return 0;
             }
-        }
-
-        @Override
-        public String toString() {
-            return "ScoredGroupedSolution{" +
-                    "score=" + score +
-                    ",isValid=" + isValid +
-                    '}';
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            ScoredGroupedSolution that = (ScoredGroupedSolution) o;
-
-            return Double.compare(that.score, score) == 0;
-        }
-
-        @Override
-        public int hashCode() {
-            long temp = Double.doubleToLongBits(score);
-            return (int) (temp ^ (temp >>> 32));
         }
     }
 }

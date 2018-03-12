@@ -130,8 +130,8 @@ public class PlayerTest {
         boxes.add(new Player.Box(6, 35, 25));
         Collections.sort(boxes, (o1, o2) -> Double.valueOf(o1.weight - o2.weight).intValue());
 
-        List<int[]> solutions = Player.generateInitialSolutions(params);
-        Player.print(solutions);
+        List<Player.Solution> solutions = Player.generateInitialSolutions(params);
+        Player.printSolution(solutions);
 
         Player.play(params);
     }
